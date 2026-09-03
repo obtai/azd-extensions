@@ -16,5 +16,5 @@ var (
 )
 
 func newVersionCommand(outputFormat *string) *cobra.Command {
-	return azdext.NewVersionCommand("obtai.deploy", Version, outputFormat)
+	return azdext.NewVersionCommand("obtai.preview", Version, outputFormat)
 }

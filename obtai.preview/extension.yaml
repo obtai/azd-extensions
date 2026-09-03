@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/refs/heads/main/cli/azd/extensions/extension.schema.json
+
+# Previews only. The release lifecycle — seeding secrets, migrating, gating on
+# health — stays in the consuming repo as azd hooks, because what a release has
+# to do differs per repo and an extension would make it rigid. A preview is the
+# same shape everywhere, which is what makes it worth sharing.
+#
+# `lifecycle-events` is deliberately absent: this extension subscribes to
+# nothing and is started only when someone runs `azd preview`.
+#
+# `metadata` is declared because the binary implements the `metadata` command —
+# azd invokes it at install and caches the result for help and IntelliSense, but
+# only if the capability is declared.
+capabilities:
+    - custom-commands
+    - metadata
+description: Per-pull-request preview environments on Azure Container Apps.
+displayName: OBT Previews
+id: obtai.preview
+language: go
+namespace: preview
+usage: azd preview <command> [options]
+version: 0.1.0

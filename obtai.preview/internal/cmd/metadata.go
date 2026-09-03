@@ -9,7 +9,7 @@ import (
 )
 
 func newMetadataCommand(rootCmd *cobra.Command) *cobra.Command {
-	return azdext.NewMetadataCommand("1.0", "obtai.deploy", func() *cobra.Command {
+	return azdext.NewMetadataCommand("1.0", "obtai.preview", func() *cobra.Command {
 		return rootCmd
 	})
 }

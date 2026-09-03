@@ -4,7 +4,7 @@
 package main
 
 import (
-	"obtai.deploy/internal/cmd"
+	"obtai.preview/internal/cmd"
 
 	"github.com/azure/azure-dev/cli/azd/pkg/azdext"
 )

@@ -7,9 +7,9 @@ import (
 
 	"github.com/azure/azure-dev/cli/azd/pkg/azdext"
 
-	"obtai.deploy/internal/azure"
-	"obtai.deploy/internal/config"
-	"obtai.deploy/internal/preview"
+	"obtai.preview/internal/azure"
+	"obtai.preview/internal/config"
+	"obtai.preview/internal/preview"
 )
 
 // outputs reads an azd environment's deployment outputs.
@@ -53,6 +53,11 @@ func newTarget(ctx context.Context, client *azdext.AzdClient) (*preview.Target, 
 	if err != nil {
 		return nil, err
 	}
+	if settings == nil {
+		return nil, fmt.Errorf(
+			"no %s here — it names the environment previews live alongside, the command "+
+				"that migrates them, and the variables they override", config.FileName)
+	}
 
 	project, err := client.Project().Get(ctx, &azdext.EmptyRequest{})
 	if err != nil {
@@ -73,6 +78,9 @@ func targetFor(
 	settings, err := config.Load(".")
 	if err != nil {
 		return nil, err
+	}
+	if settings == nil {
+		return nil, fmt.Errorf("no %s here", config.FileName)
 	}
 
 	values, err := outputs(ctx, client, environment)

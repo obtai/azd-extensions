@@ -27,19 +27,22 @@
 package preview
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/appcontainers/armappcontainers/v3"
 
-	"obtai.deploy/internal/azure"
-	"obtai.deploy/internal/config"
+	"obtai.preview/internal/azure"
+	"obtai.preview/internal/config"
 )
 
 const (
@@ -94,16 +97,6 @@ func (t *Target) secret(name string) (string, error) {
 	return *response.Value, nil
 }
 
-// Provision runs the repository's migration command for an environment that is
-// not a preview — an ordinary release. Called from the predeploy hook.
-func (t *Target) Provision(ctx context.Context, appEnv, appURL, database string) error {
-	if t.Config.Provision == "" {
-		return nil
-	}
-	names := Names{URL: appURL, Database: database}
-	overrides := map[string]string{"APP_ENV": appEnv}
-	return t.run(ctx, 0, names, overrides)
-}
 
 // Names are everything derived from a pull request number.
 type Names struct {
@@ -298,22 +291,60 @@ func (t *Target) provision(ctx context.Context, pr int, names Names) error {
 // machine running a deploy has none of those, because they belong to the
 // container, not to the deploy.
 func (t *Target) run(ctx context.Context, pr int, names Names, env map[string]string) error {
-	resolved, err := config.ExpandFull(t.Config.ProvisionEnv, t.vars(pr, names))
+	// Every deployment output, then provisionEnv, then the stage-specific
+	// values — each layer able to override the one before.
+	//
+	// The outputs go in wholesale because a repository's provision script is
+	// entitled to read anything the deployment recorded, and an extension
+	// subprocess inherits none of them: azd hands an extension its environment
+	// over gRPC, not through the process environment. Leaving them out meant
+	// AZURE_TENANT_ID was unset for the migration, and the Foundry client
+	// failed on a release while working perfectly when run by hand.
+	resolved := map[string]string{}
+	for key, value := range t.Outputs {
+		resolved[key] = value
+	}
+
+	fromConfig, err := config.ExpandFull(t.Config.ProvisionEnv, t.vars(pr, names))
 	if err != nil {
 		return err
 	}
+	for key, value := range fromConfig {
+		resolved[key] = value
+	}
+
 	for key, value := range env {
 		resolved[key] = value
 	}
 
 	command := exec.CommandContext(ctx, "sh", "-c", t.Config.Provision)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+
+	// Streamed AND captured. Streaming is what you want when running this by
+	// hand; capturing is what makes a failure legible when azd runs it, because
+	// azd's progress display swallows a handler's stdout and reports only
+	// "exit status 1". A handler that fails has to carry its own reason.
+	var captured bytes.Buffer
+	command.Stdout = io.MultiWriter(os.Stdout, &captured)
+	command.Stderr = io.MultiWriter(os.Stderr, &captured)
+
 	command.Env = os.Environ()
 	for key, value := range resolved {
 		command.Env = append(command.Env, key+"="+value)
 	}
-	return command.Run()
+
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("%s: %w\n%s", t.Config.Provision, err, tail(captured.String(), 30))
+	}
+	return nil
+}
+
+// tail returns the last n lines, which is where a stack trace keeps its point.
+func tail(output string, n int) string {
+	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (t *Target) dropDatabase(ctx context.Context, name string) error {

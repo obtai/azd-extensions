@@ -1,4 +1,4 @@
-module obtai.deploy
+module obtai.preview
 
 go 1.26.4
 

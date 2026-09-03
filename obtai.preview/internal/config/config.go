@@ -1,4 +1,4 @@
-// Package config reads what a repository has to say about its own deployment.
+// Package config reads what a repository has to say about its previews.
 //
 // Everything here genuinely varies between repositories. Everything that does
 // not — the preview lifecycle, the per-push image tag, the order a release
@@ -22,9 +22,9 @@ import (
 )
 
 // FileName is the config a repository puts beside its azure.yaml.
-const FileName = "deploy.yaml"
+const FileName = "preview.yaml"
 
-// Config is the whole of deploy.yaml.
+// Config is the whole of preview.yaml.
 type Config struct {
 	// PreviewEnvironment is the environment previews are deployed alongside.
 	// They always live in an existing one, never their own: azd's unit is an
@@ -42,12 +42,6 @@ type Config struct {
 	// so it authenticates as the CALLER rather than as the app.
 	Provision string `yaml:"provision"`
 
-	// Secrets the app cannot start without, by APP ENVIRONMENT VARIABLE NAME.
-	// Generated on the provision that finds them missing and never touched
-	// again. The Key Vault secret name is this, kebab-cased — the same
-	// transform a Bicep template applies when it builds a secret reference, so
-	// the two stay in step by construction.
-	Secrets []string `yaml:"secrets"`
 
 	// Env is what a preview overrides on the app it was cloned from.
 	// Everything else — identity, registry, secret references, probes, every
@@ -71,17 +65,22 @@ type Config struct {
 	Dockerfile string `yaml:"dockerfile"`
 }
 
-// Load reads deploy.yaml from dir, applying defaults.
+// Load reads preview.yaml from dir, applying defaults.
+//
+// Returns (nil, nil) when there is no preview.yaml at all. Every other problem is
+// an error: a handler that cannot tell "this repo opts out" from "this repo's
+// config is broken" will silently skip the migration it was supposed to run.
 func Load(dir string) (*Config, error) {
 	path := filepath.Join(dir, FileName)
 
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf(
-				"no %s in %s — it names the secrets a release seeds, the command that "+
-					"migrates a database, and the environment previews live alongside",
-				FileName, dir)
+			// Absent is an answer, not a failure: a repository that has this
+			// extension installed but does not use it should be left alone.
+			// Anything else — unreadable, malformed, missing a required field —
+			// is a failure, and must not be mistaken for absence.
+			return nil, nil
 		}
 		return nil, fmt.Errorf("reading %s: %w", FileName, err)
 	}
@@ -183,7 +182,3 @@ func ExpandFull(values map[string]string, vars Vars) (map[string]string, error) 
 	return expanded, nil
 }
 
-// VaultName is the Key Vault secret an app environment variable is stored under.
-func VaultName(envVar string) string {
-	return strings.ToLower(strings.ReplaceAll(envVar, "_", "-"))
-}
