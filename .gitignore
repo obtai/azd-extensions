@@ -1,0 +1,4 @@
+# Built extension binaries and packed artifacts — `azd x build` regenerates them.
+bin/
+*.tar.gz
+*.zip
