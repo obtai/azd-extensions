@@ -17,13 +17,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerregistry/armcontainerregistry"
 )
 
-// BuildImage builds an image with ACR Tasks and pushes it to the registry.
-//
-// The build happens in Azure, so no Docker daemon is involved anywhere — not on
-// a laptop and not on a runner. `az acr build` looks like one command and is
-// four things, all of which are here: ask the registry for a source upload URL,
-// tar the build context honouring .dockerignore, upload it, and schedule a
-// Docker build.
+// BuildImage builds an image with ACR Tasks and pushes it to the registry: ask
+// for a source upload URL, tar the build context, upload it, schedule a build.
+// The build happens in Azure, so no Docker daemon is involved anywhere.
 func (c *Clients) BuildImage(
 	ctx context.Context,
 	registryName string,
@@ -101,10 +97,8 @@ func (c *Clients) BuildImage(
 }
 
 // waitForRun blocks until an ACR task run reaches a terminal state.
-//
-// BeginScheduleRun's poller completes when the run has been SCHEDULED, not when
-// it has finished — it returns with the run sitting in Queued. The run itself is
-// a separate resource with its own lifecycle, so it has to be polled.
+// BeginScheduleRun's poller completes when the run has been scheduled, not when
+// it has finished, so the run has to be polled separately.
 func (c *Clients) waitForRun(ctx context.Context, registryName, runID string) error {
 	const (
 		timeout  = 30 * time.Minute
@@ -117,8 +111,7 @@ func (c *Clients) waitForRun(ctx context.Context, registryName, runID string) er
 	finished := Until(ctx, timeout, interval, func(ctx context.Context) bool {
 		run, err := c.Runs.Get(ctx, c.ResourceGroup, registryName, runID, nil)
 		if err != nil {
-			// A transient read failure should not abandon a build that is
-			// probably still running; the deadline is the backstop.
+			// The deadline is the backstop for a transient read failure.
 			return false
 		}
 		if run.Properties == nil || run.Properties.Status == nil {
@@ -151,8 +144,7 @@ func (c *Clients) waitForRun(ctx context.Context, registryName, runID string) er
 		return nil
 	}
 
-	// A failed build is worth its log. Without this the only evidence is a
-	// status word, and the run id means nothing without the portal.
+	// Without the log the only evidence is a status word.
 	if logs, err := c.runLog(ctx, registryName, runID); err == nil && logs != "" {
 		fmt.Println(logs)
 	}
@@ -188,14 +180,10 @@ func (c *Clients) runLog(ctx context.Context, registryName, runID string) (strin
 	return strings.Join(lines, "\n"), nil
 }
 
-// writeContext tars and gzips a build context, honouring .dockerignore.
-//
-// The Dockerfile is always included, whatever .dockerignore says. Docker itself
-// special-cases the file named by -f, so excluding `Dockerfile*` is a common and
-// correct thing for a repository to do — it keeps the Dockerfile out of the
-// layer cache key. ACR Tasks, though, reads the Dockerfile out of the uploaded
-// context, so honouring that exclusion here produces
-// `open Dockerfile: no such file or directory` from a build that works locally.
+// writeContext tars and gzips a build context, honouring .dockerignore. The
+// Dockerfile is always included whatever .dockerignore says: Docker
+// special-cases the file named by -f, but ACR Tasks reads it out of the
+// uploaded context.
 func writeContext(out io.Writer, root, dockerfile string) error {
 	ignore, err := loadDockerignore(root)
 	if err != nil {
@@ -228,8 +216,8 @@ func writeContext(out io.Writer, root, dockerfile string) error {
 			return nil
 		}
 
-		// Symlinks and sockets have no place in a build context, and following
-		// them is how a context accidentally includes a home directory.
+		// Following a symlink is how a context accidentally includes a home
+		// directory.
 		if !entry.IsDir() && !entry.Type().IsRegular() {
 			return nil
 		}
@@ -266,15 +254,11 @@ func putBlob(ctx context.Context, url string, body *os.File, size int64) error {
 	if err != nil {
 		return err
 	}
-	// The SAS URL carries its own authorisation, so this is the one request
-	// here that takes no credential.
+	// The SAS URL carries its own authorisation.
 	request.Header.Set("x-ms-blob-type", "BlockBlob")
 
-	// Set explicitly. Go infers a length only for a handful of in-memory reader
-	// types, and falls back to `Transfer-Encoding: chunked` for anything else —
-	// including an *os.File. Blob storage does not accept a chunked PUT, and
-	// rejects it as an unsupported HEADER, which reads as though the problem
-	// were x-ms-blob-type.
+	// Set explicitly: Go would otherwise send an *os.File chunked, which blob
+	// storage rejects as an unsupported header.
 	request.ContentLength = size
 
 	response, err := http.DefaultClient.Do(request)

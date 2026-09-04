@@ -1,15 +1,6 @@
-// Package azure wraps the Azure SDK clients this extension needs.
-//
-// Everything goes through the SDK rather than the `az` CLI. That is not a style
-// preference — shelling out and reading stdout back produced the same class of
-// failure repeatedly, and always the same shape: a failure that looked like an
-// answer. A mistyped flag inside a silenced existence check is
-// indistinguishable from "the resource does not exist", so a teardown once
-// skipped a database it should have dropped and a closed pull request kept its
-// data.
-//
-// Here, "does not exist" is a 404 on a typed error, and a long operation is a
-// poller rather than a sleep loop.
+// Package azure wraps the Azure SDK clients this extension needs. Everything
+// goes through the SDK rather than the `az` CLI, so "does not exist" is a 404
+// on a typed error rather than an unparseable failure that looks like an answer.
 package azure
 
 import (
@@ -41,12 +32,6 @@ type Clients struct {
 }
 
 // New builds the clients for a subscription and resource group.
-//
-// The credential is deliberately explicit rather than DefaultAzureCredential:
-// that chain's silent fallbacks turn a misconfiguration into a confusing
-// failure several steps later instead of a clear one here. Inside a container
-// the managed identity answers; anywhere else — a laptop, or a runner after
-// azure/login — it is the CLI session.
 func New(ctx context.Context, subscriptionID, resourceGroup string) (*Clients, error) {
 	credential, err := newCredential()
 	if err != nil {
@@ -78,9 +63,10 @@ func New(ctx context.Context, subscriptionID, resourceGroup string) (*Clients, e
 	}, nil
 }
 
+// newCredential is explicit rather than DefaultAzureCredential, whose silent
+// fallbacks turn a misconfiguration into a confusing failure several steps later.
 func newCredential() (azcore.TokenCredential, error) {
-	// Container Apps injects IDENTITY_ENDPOINT and the token comes from that
-	// local endpoint — no secret, nothing to rotate.
+	// Container Apps injects IDENTITY_ENDPOINT.
 	if endpoint := firstSet("IDENTITY_ENDPOINT", "MSI_ENDPOINT"); endpoint != "" {
 		clientID := firstSet("AZURE_CLIENT_ID")
 		if clientID == "" {
@@ -99,15 +85,11 @@ func (c *Clients) Secrets(vaultName string) (*azsecrets.Client, error) {
 	return azsecrets.NewClient("https://"+vaultName+".vault.azure.net", c.credential, nil)
 }
 
-// Credential exposes the shared credential for the few calls that need to build
-// their own client, such as uploading a build context to a SAS URL.
+// Credential exposes the shared credential for calls that build their own client.
 func (c *Clients) Credential() azcore.TokenCredential { return c.credential }
 
-// NotFound reports whether an error is Azure saying "no such thing".
-//
-// The distinction that matters is that a 403 is not a 404. An operator without
-// data-plane access to a POPULATED Key Vault must not be told it is empty, or
-// the next thing that happens is a seeding run overwriting live secrets.
+// NotFound reports whether an error is Azure saying "no such thing". A 403 is
+// not a 404 — see Forbidden.
 func NotFound(err error) bool {
 	var responseError *azcore.ResponseError
 	return errors.As(err, &responseError) && responseError.StatusCode == http.StatusNotFound

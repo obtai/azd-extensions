@@ -12,14 +12,8 @@ import (
 	"github.com/obtai/azd-extensions/preview/internal/preview"
 )
 
-// outputs reads an azd environment's deployment outputs.
-//
-// azd writes every Bicep output into the environment, uppercased. Nothing in
-// this extension re-derives a resource name from a convention: registries, Key
-// Vaults, database servers and AI accounts carry a uniqueString() suffix and
-// are not guessable, and the alternatives — listing and taking the first, or
-// parsing a parameter file — can all disagree with what is actually deployed.
-// The deployment cannot.
+// outputs reads an azd environment's deployment outputs, which azd writes
+// uppercased from the Bicep outputs.
 func outputs(ctx context.Context, client *azdext.AzdClient, name string) (map[string]string, error) {
 	response, err := client.Environment().GetValues(ctx, &azdext.GetEnvironmentRequest{Name: name})
 	if err != nil {
@@ -33,8 +27,7 @@ func outputs(ctx context.Context, client *azdext.AzdClient, name string) (map[st
 	return values, nil
 }
 
-// environmentPrefix is the prefix a Bicep template following this convention
-// emits: `sales` gives SALES_CONTAINER_APP_NAME, SALES_KEY_VAULT_NAME and so on.
+// environmentPrefix: `sales` gives SALES_CONTAINER_APP_NAME and so on.
 func environmentPrefix(project string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(project))
 }
@@ -67,8 +60,7 @@ func newTarget(ctx context.Context, client *azdext.AzdClient) (*preview.Target, 
 	return targetFor(ctx, client, project.Project.Name, settings.PreviewEnvironment)
 }
 
-// targetFor assembles a target against a named environment. A preview always
-// uses the one named in preview.yaml; a release uses whichever is selected.
+// targetFor assembles a target against a named environment.
 func targetFor(
 	ctx context.Context,
 	client *azdext.AzdClient,
@@ -110,9 +102,8 @@ func targetFor(
 	if err != nil {
 		return nil, err
 	}
-	// Scheduling a build is a management-plane call and wants the registry's
-	// resource name; listing and deleting tags are data-plane and want the
-	// login server.
+	// Scheduling a build wants the registry's resource name; listing and
+	// deleting tags want the login server above.
 	registry, err := require(values, prefix+"_ACR_NAME", environment)
 	if err != nil {
 		return nil, err

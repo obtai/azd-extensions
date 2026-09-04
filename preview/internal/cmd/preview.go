@@ -9,11 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newUpCommand is the whole developer-facing surface:
-//
-//	azd preview up 123        create or update the preview for pull request 123
-//	azd preview down 123      tear it down
-//	azd preview url 123       print its URL and nothing else
 func newUpCommand() *cobra.Command {
 	var sha, ref string
 
@@ -44,7 +39,6 @@ func newUpCommand() *cobra.Command {
 				return err
 			}
 
-			// So a workflow can put it in a comment without asking again.
 			if path := os.Getenv("GITHUB_OUTPUT"); path != "" {
 				return appendLine(path, "url="+names.URL)
 			}
@@ -108,9 +102,8 @@ func newURLCommand() *cobra.Command {
 				return err
 			}
 
-			// Derived, not looked up: the app name is stable for the life of
-			// the pull request, so this answers whether or not the preview
-			// exists — which is what a comment on a failed build needs.
+			// Derived, not looked up, so this answers whether or not the
+			// preview exists.
 			fmt.Println(target.Names(pr).URL)
 			return nil
 		},

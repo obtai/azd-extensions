@@ -11,11 +11,8 @@ const (
 	healthInterval = 5 * time.Second
 )
 
-// WaitHealthy blocks until an app's latest revision reports healthy.
-//
-// Deactivates it and fails otherwise: a revision that never came up holds
-// replicas and a revision slot, and the previous one is still serving, so
-// failing here leaves the environment exactly as it was.
+// WaitHealthy blocks until an app's latest revision reports healthy, and
+// deactivates it otherwise so the previous revision keeps serving.
 func WaitHealthy(ctx context.Context, clients *Clients, app string) error {
 	response, err := clients.ContainerApps.Get(ctx, clients.ResourceGroup, app, nil)
 	if err != nil {

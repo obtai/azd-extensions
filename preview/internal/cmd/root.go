@@ -9,17 +9,9 @@ import (
 )
 
 // NewRootCommand builds `azd preview`.
-//
-// Previews and nothing else. A release's lifecycle — seeding secrets,
-// migrating, gating on health — belongs to the repository being released, as
-// azd hooks in its azure.yaml, because what those steps have to do differs per
-// repository. A preview does not: it is the same shape everywhere, which is
-// what makes it worth putting in a shared tool.
 func NewRootCommand() *cobra.Command {
-	// `Name` and `Use` are this binary's own help output. The name azd exposes
-	// comes from `namespace` in extension.yaml, since azd invokes the binary
-	// with the subcommand arguments only — they have to agree, or the help text
-	// contradicts the command that produced it.
+	// `Name` must agree with `namespace` in extension.yaml — azd invokes the
+	// binary with the subcommand arguments only.
 	rootCmd, extCtx := azdext.NewExtensionRootCommand(azdext.ExtensionCommandOptions{
 		Name:  "preview",
 		Use:   "preview <command> [options]",

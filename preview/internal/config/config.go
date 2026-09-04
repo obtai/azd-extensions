@@ -1,14 +1,7 @@
 // Package config reads what a repository has to say about its previews.
 //
-// Everything here genuinely varies between repositories. Everything that does
-// not — the preview lifecycle, the per-push image tag, the order a release
-// happens in — lives in the extension and is deliberately not configurable. A
-// second repository doing those differently is how two deployments drift into
-// needing two sets of instructions.
-//
-// Resource NAMES are not configurable either, beyond the project name. They
-// come from the deployment outputs, which is the one source that cannot
-// disagree with what is actually deployed.
+// Only what genuinely varies between repositories belongs here — the preview
+// lifecycle and resource names are deliberately not configurable.
 package config
 
 import (
@@ -45,7 +38,6 @@ type Config struct {
 	// so it authenticates as the CALLER rather than as the app.
 	Provision string `yaml:"provision"`
 
-
 	// Env is what a preview overrides on the app it was cloned from.
 	// Everything else — identity, registry, secret references, probes, every
 	// other variable — is inherited, so a new variable in the infrastructure
@@ -68,33 +60,21 @@ type Config struct {
 	Dockerfile string `yaml:"dockerfile"`
 }
 
-// Load reads preview.yaml from dir, applying defaults.
-//
-// Returns (nil, nil) when there is no preview.yaml at all. Every other problem is
-// an error: a handler that cannot tell "this repo opts out" from "this repo's
-// config is broken" will silently skip the migration it was supposed to run.
+// Load reads preview.yaml from dir, applying defaults. Returns (nil, nil) when
+// there is no preview.yaml; every other problem is an error.
 func Load(dir string) (*Config, error) {
 	path := filepath.Join(dir, FileName)
 
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Absent is an answer, not a failure: a repository that has this
-			// extension installed but does not use it should be left alone.
-			// Anything else — unreadable, malformed, missing a required field —
-			// is a failure, and must not be mistaken for absence.
 			return nil, nil
 		}
 		return nil, fmt.Errorf("reading %s: %w", FileName, err)
 	}
 
-	// KnownFields, so an unrecognised key is an error naming the key rather
-	// than a line that is silently ignored. A mistyped `previewEnvironment`
-	// would otherwise unmarshal to nothing and surface as "previewEnvironment
-	// is required" pointing at a file that appears to set it.
-	//
-	// preview.schema.json says the same thing to an editor. This says it to
-	// everyone else, CI included.
+	// KnownFields, so a mistyped key is an error naming the key rather than a
+	// line that is silently ignored.
 	decoder := yaml.NewDecoder(bytes.NewReader(contents))
 	decoder.KnownFields(true)
 
@@ -142,8 +122,7 @@ func Expand(values map[string]string, vars Vars) map[string]string {
 }
 
 // ExpandFull also resolves ${output:NAME}, ${env:NAME|fallback} and
-// ${secret:name}. Secrets are fetched lazily, so a config naming none costs no
-// round trip.
+// ${secret:name}.
 func ExpandFull(values map[string]string, vars Vars) (map[string]string, error) {
 	expanded := Expand(values, vars)
 
@@ -194,4 +173,3 @@ func ExpandFull(values map[string]string, vars Vars) (map[string]string, error) 
 
 	return expanded, nil
 }
-

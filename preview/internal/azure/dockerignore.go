@@ -8,13 +8,8 @@ import (
 	"strings"
 )
 
-// dockerignore is a .dockerignore matcher.
-//
-// The rules are the same as .gitignore with one difference that matters: a
-// later pattern wins, so a `!` negation only re-includes a path if nothing
-// after it excludes it again. Matching is done against slash-separated paths
-// relative to the context root, and a directory match excludes everything
-// under it.
+// dockerignore matches slash-separated paths relative to the context root.
+// Rules are .gitignore's, except that a later pattern wins.
 type dockerignore struct {
 	patterns []ignorePattern
 }
@@ -56,8 +51,7 @@ func loadDockerignore(root string) (*dockerignore, error) {
 
 // matches reports whether a slash-separated relative path is excluded.
 func (d *dockerignore) matches(name string) bool {
-	// .git is never a build input and is frequently large. Docker excludes it
-	// implicitly; so does this.
+	// Docker excludes .git implicitly; so does this.
 	if name == ".git" || strings.HasPrefix(name, ".git/") {
 		return true
 	}
@@ -83,8 +77,7 @@ func (p ignorePattern) match(name string) bool {
 		}
 	}
 
-	// `**/x` and bare `x` both mean "x at any depth", which path.Match cannot
-	// express on its own.
+	// `**/x` and bare `x` both mean "x at any depth".
 	base := strings.TrimPrefix(p.pattern, "**/")
 	if !strings.Contains(base, "/") {
 		for _, segment := range strings.Split(name, "/") {

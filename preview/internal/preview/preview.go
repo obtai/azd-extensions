@@ -1,29 +1,15 @@
 // Package preview creates and destroys per-pull-request preview environments.
 //
-// Each pull request gets its OWN container app in an existing environment,
-// sharing everything expensive — the Container Apps environment, the database
-// server, the registry, the managed identity, the Key Vault — and owning only
-// the two cheap things: an app that scales to zero, and its own database.
+// Each pull request gets its own container app in an existing environment,
+// served at https://ca-<project>-pr-<n>.<environment default domain> and
+// sharing everything expensive: the Container Apps environment, the database
+// server, the registry, the managed identity, the Key Vault.
 //
-//	https://ca-<project>-pr-<n>.<environment default domain>
-//
-// Stable for the life of the pull request, known before the deploy, and
-// genuinely gone afterwards.
-//
-// # Why an app and not a revision
-//
-// A preview is the obvious candidate for a zero-traffic REVISION of the primary
-// app, and that does not work. Revisions are immutable and uniquely named, so
-// the second push to a pull request cannot update one: Container Apps compares
-// the template, finds it identical, creates nothing, and returns success. The
-// preview then serves the first build forever while the workflow reports a
-// green tick.
-//
-// Giving each pull request an app separates the name that must stay STABLE (the
-// app, and therefore the URL) from the one that must CHANGE on every push (the
-// image tag). That is the whole trick, and it is why the tag carries the commit.
-// It also lets the primary apps run in single-revision mode, so there is no
-// traffic split to manage anywhere.
+// An app rather than a zero-traffic revision of the primary app, because
+// revisions are immutable: the second push to a pull request would find an
+// identical template, create nothing, and return success while serving the
+// first build forever. An app keeps the URL stable while the image tag changes
+// per push.
 package preview
 
 import (
@@ -53,8 +39,7 @@ const (
 var appNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
 
 // Target is everything a preview needs to know about where it is going. Every
-// field comes from a deployment output: registries, Key Vaults and database
-// servers carry a uniqueString() suffix and cannot be derived from a name.
+// field comes from a deployment output.
 type Target struct {
 	Clients   *azure.Clients
 	Config    *config.Config
@@ -68,7 +53,6 @@ type Target struct {
 	Outputs   map[string]string
 }
 
-// vars is what a substitution in preview.yaml can draw on.
 func (t *Target) vars(pr int, names Names) config.Vars {
 	return config.Vars{
 		PR:       pr,
@@ -97,7 +81,6 @@ func (t *Target) secret(name string) (string, error) {
 	return *response.Value, nil
 }
 
-
 // Names are everything derived from a pull request number.
 type Names struct {
 	App       string
@@ -121,16 +104,14 @@ func (t *Target) Names(pr int) Names {
 func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, error) {
 	names := t.Names(pr)
 
-	// Container app names are capped at 32 characters. Assert it rather than
-	// discover it from an API error half way through a deploy.
+	// Container app names are capped at 32 characters.
 	if len(names.App) > 32 || !appNamePattern.MatchString(names.App) {
 		return names, fmt.Errorf("invalid container app name %q", names.App)
 	}
 
-	// The APP NAME is stable; the IMAGE TAG is per push, and must be. Container
-	// Apps creates a new revision only when the template actually changes, and
-	// an unchanged tag STRING is an unchanged template no matter what digest it
-	// now points at.
+	// The tag must differ per push: Container Apps creates a revision only when
+	// the template changes, and an unchanged tag string is an unchanged
+	// template whatever digest it now points at.
 	stamp := time.Now().UTC().Format("20060102150405")
 	if sha != "" {
 		stamp = sha[:min(7, len(sha))]
@@ -160,9 +141,8 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 	}
 
 	if existing != nil {
-		// Later pushes: only the image changes. Read, mutate and write the
-		// whole app rather than sending a partial template — a partial
-		// container drops the probes, environment and resources alongside it.
+		// Read, mutate and write the whole app: a partial template drops the
+		// probes, environment and resources alongside the image.
 		fmt.Printf("==> Updating %s\n", names.App)
 		if existing.Properties == nil || existing.Properties.Template == nil ||
 			len(existing.Properties.Template.Containers) == 0 {
@@ -187,9 +167,8 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 		}
 	}
 
-	// Assert rather than assume. Container Apps silently declines to create a
-	// revision whose template matches the running one, so a successful call is
-	// not evidence that this push is what is now being served.
+	// Container Apps silently declines to create a revision whose template
+	// matches the running one, so a successful call is not evidence.
 	running, err := t.app(ctx, names.App)
 	if err != nil {
 		return names, err
@@ -198,10 +177,8 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 		return names, fmt.Errorf("%s is serving %q, expected %q", names.App, got, image)
 	}
 
-	// Wait for it to actually serve before saying it does. The pull request
-	// comment goes up the moment this returns, and a reviewer clicking a URL
-	// that 404s reports the preview as broken. Not fatal on timeout — a cold app
-	// that is slow to warm is worth a note, not a failed check.
+	// The pull request comment goes up the moment this returns. Not fatal on
+	// timeout: a cold app that is slow to warm is worth a note, not a failure.
 	fmt.Printf("==> Waiting for %s\n", names.URL)
 	if !azure.Until(ctx, serveTimeout, serveInterval, func(ctx context.Context) bool {
 		return serving(ctx, names.URL)
@@ -242,8 +219,7 @@ func (t *Target) Destroy(ctx context.Context, pr int) error {
 		return err
 	}
 
-	// Every push's tag, found by prefix — the pull request pushed one per
-	// commit and teardown is not told which.
+	// Found by prefix: the pull request pushed one tag per commit.
 	fmt.Println("==> Image tags")
 	tags, err := t.Clients.TagsWithPrefix(ctx, t.Login, t.Project, names.TagPrefix)
 	if err != nil {
@@ -286,20 +262,12 @@ func (t *Target) provision(ctx context.Context, pr int, names Names) error {
 }
 
 // run executes the repository's provision command with the environment a
-// migration needs. `env` supplies the stage-specific values — APP_ENV, the URL,
-// the database — and provisionEnv the rest: a host, a login, a secret. The
-// machine running a deploy has none of those, because they belong to the
-// container, not to the deploy.
+// migration needs.
 func (t *Target) run(ctx context.Context, pr int, names Names, env map[string]string) error {
 	// Every deployment output, then provisionEnv, then the stage-specific
-	// values — each layer able to override the one before.
-	//
-	// The outputs go in wholesale because a repository's provision script is
-	// entitled to read anything the deployment recorded, and an extension
-	// subprocess inherits none of them: azd hands an extension its environment
-	// over gRPC, not through the process environment. Leaving them out meant
-	// AZURE_TENANT_ID was unset for the migration, and the Foundry client
-	// failed on a release while working perfectly when run by hand.
+	// values, each layer overriding the one before. The outputs go in wholesale
+	// because azd hands an extension its environment over gRPC, so a subprocess
+	// inherits none of them.
 	resolved := map[string]string{}
 	for key, value := range t.Outputs {
 		resolved[key] = value
@@ -319,10 +287,8 @@ func (t *Target) run(ctx context.Context, pr int, names Names, env map[string]st
 
 	command := exec.CommandContext(ctx, "sh", "-c", t.Config.Provision)
 
-	// Streamed AND captured. Streaming is what you want when running this by
-	// hand; capturing is what makes a failure legible when azd runs it, because
-	// azd's progress display swallows a handler's stdout and reports only
-	// "exit status 1". A handler that fails has to carry its own reason.
+	// Streamed and captured: azd's progress display swallows a handler's
+	// stdout and reports only "exit status 1".
 	var captured bytes.Buffer
 	command.Stdout = io.MultiWriter(os.Stdout, &captured)
 	command.Stderr = io.MultiWriter(os.Stderr, &captured)
@@ -338,7 +304,7 @@ func (t *Target) run(ctx context.Context, pr int, names Names, env map[string]st
 	return nil
 }
 
-// tail returns the last n lines, which is where a stack trace keeps its point.
+// tail returns the last n lines.
 func tail(output string, n int) string {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	if len(lines) > n {
@@ -391,13 +357,9 @@ func serving(ctx context.Context, url string) bool {
 	return response.StatusCode == http.StatusOK
 }
 
-// clone builds a preview app from the app it is cloned from.
-//
-// Deriving it rather than restating it is the point. A preview needs the same
-// managed identity, registry, Key Vault secret references and probes; listing
-// those in a config file would mean every environment variable added to the
-// infrastructure had to be added a second time, and previews would silently
-// drift from the thing they exist to preview.
+// clone derives a preview app from the app it previews, rather than restating
+// its identity, registry, secret references and probes in a config file that
+// would drift.
 func clone(source armappcontainers.ContainerApp, image string, overrides map[string]string) armappcontainers.ContainerApp {
 	container := source.Properties.Template.Containers[0]
 
@@ -420,13 +382,11 @@ func clone(source armappcontainers.ContainerApp, image string, overrides map[str
 		}
 		env = append(env, entry)
 	}
-	// Anything the source app does not already set still has to reach the preview.
 	for key, value := range pending {
 		env = append(env, &armappcontainers.EnvironmentVar{Name: to.Ptr(key), Value: to.Ptr(value)})
 	}
 
-	// Only the identity NAMES carry over; the client and principal ids are
-	// read-only and are rejected on create.
+	// Only the identity names carry over; the ids are read-only on create.
 	var identity *armappcontainers.ManagedServiceIdentity
 	if source.Identity != nil {
 		assigned := map[string]*armappcontainers.UserAssignedIdentity{}
@@ -448,9 +408,7 @@ func clone(source armappcontainers.ContainerApp, image string, overrides map[str
 			EnvironmentID:       source.Properties.EnvironmentID,
 			WorkloadProfileName: source.Properties.WorkloadProfileName,
 			Configuration: &armappcontainers.Configuration{
-				// Single, unlike the app it was cloned from: a preview has
-				// exactly one thing to serve, so there is no traffic split and
-				// no pin to preserve.
+				// Single: a preview has one thing to serve.
 				ActiveRevisionsMode: to.Ptr(armappcontainers.ActiveRevisionsModeSingle),
 				Ingress: &armappcontainers.Ingress{
 					External:      ingress.External,
@@ -469,8 +427,7 @@ func clone(source armappcontainers.ContainerApp, image string, overrides map[str
 					Probes:    container.Probes,
 					Env:       env,
 				}},
-				// Scales to zero, so an idle preview costs nothing beyond the
-				// scale-in cool-down. One replica is plenty for review.
+				// Scales to zero, so an idle preview costs nothing.
 				Scale: &armappcontainers.Scale{
 					MinReplicas: to.Ptr(int32(0)),
 					MaxReplicas: to.Ptr(int32(1)),

@@ -19,8 +19,7 @@ func (c *Clients) TagsWithPrefix(ctx context.Context, loginServer, repository, p
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			// A repository that has never been pushed to is not an error here:
-			// a pull request whose build never succeeded has no tags to clean.
+			// A repository that has never been pushed to has no tags to clean.
 			if NotFound(err) {
 				return nil, nil
 			}
@@ -35,11 +34,8 @@ func (c *Clients) TagsWithPrefix(ctx context.Context, loginServer, repository, p
 	return found, nil
 }
 
-// DeleteTag removes a tag.
-//
-// Untag only: the manifest is left to the registry's retention policy rather
-// than force-deleted, so a layer shared with another tag cannot be pulled out
-// from under it.
+// DeleteTag untags only, leaving the manifest to the registry's retention
+// policy so a layer shared with another tag survives.
 func (c *Clients) DeleteTag(ctx context.Context, loginServer, repository, tag string) error {
 	client, err := azcontainerregistry.NewClient("https://"+loginServer, c.credential, nil)
 	if err != nil {
