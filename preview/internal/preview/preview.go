@@ -41,8 +41,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/appcontainers/armappcontainers/v3"
 
-	"obtai.preview/internal/azure"
-	"obtai.preview/internal/config"
+	"github.com/obtai/azd-extensions/preview/internal/azure"
+	"github.com/obtai/azd-extensions/preview/internal/config"
 )
 
 const (

@@ -12,7 +12,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +37,7 @@ type Config struct {
 	// Qualified rather than plain `environment`, because this file describes an
 	// ordinary release as well, and there "the environment" means the one being
 	// deployed.
-	PreviewEnvironment string `yaml:"previewEnvironment"`
+	PreviewEnvironment string `yaml:"previewEnvironment" jsonschema:"required"`
 
 	// Provision brings a database up to date — migrations, seeds, whatever a
 	// release needs before anything can serve. Run with the preview's own
@@ -51,10 +54,10 @@ type Config struct {
 	// ${url}, ${database} and ${pr} are substituted.
 	Env map[string]string `yaml:"env"`
 
-	// ProvisionEnv is the environment the provision command runs with, for both
-	// a preview and an ordinary release. It exists because migrating a database
-	// needs things a container gets from its own configuration — a host, a
-	// login, a secret — and the machine running the deploy has none of them.
+	// ProvisionEnv is extra environment for the provision command, on top of
+	// the deployment outputs it already receives. Reach for it when a migration
+	// needs something the deployment did not record — a Key Vault secret, or a
+	// value that differs per caller.
 	//
 	// Substitutions: ${output:NAME} for a deployment output, ${secret:name} for
 	// a Key Vault secret, ${env:NAME} for the caller's own environment (with
@@ -85,8 +88,18 @@ func Load(dir string) (*Config, error) {
 		return nil, fmt.Errorf("reading %s: %w", FileName, err)
 	}
 
+	// KnownFields, so an unrecognised key is an error naming the key rather
+	// than a line that is silently ignored. A mistyped `previewEnvironment`
+	// would otherwise unmarshal to nothing and surface as "previewEnvironment
+	// is required" pointing at a file that appears to set it.
+	//
+	// preview.schema.json says the same thing to an editor. This says it to
+	// everyone else, CI included.
+	decoder := yaml.NewDecoder(bytes.NewReader(contents))
+	decoder.KnownFields(true)
+
 	var config Config
-	if err := yaml.Unmarshal(contents, &config); err != nil {
+	if err := decoder.Decode(&config); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing %s: %w", FileName, err)
 	}
 

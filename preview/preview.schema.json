@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/obtai/azd-extensions/main/preview/preview.schema.json",
+  "properties": {
+    "previewEnvironment": {
+      "type": "string",
+      "description": "PreviewEnvironment is the environment previews are deployed alongside.\nThey always live in an existing one, never their own: azd's unit is an\nenvironment, and one per pull request would mean a resource group,\ndatabase server and everything else per pull request.\n\nQualified rather than plain `environment`, because this file describes an\nordinary release as well, and there \"the environment\" means the one being\ndeployed."
+    },
+    "provision": {
+      "type": "string",
+      "description": "Provision brings a database up to date — migrations, seeds, whatever a\nrelease needs before anything can serve. Run with the preview's own\ndatabase and URL in its environment, on whichever machine is deploying,\nso it authenticates as the CALLER rather than as the app."
+    },
+    "env": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object",
+      "description": "Env is what a preview overrides on the app it was cloned from.\nEverything else — identity, registry, secret references, probes, every\nother variable — is inherited, so a new variable in the infrastructure\nreaches previews without this file being touched.\n\n${url}, ${database} and ${pr} are substituted."
+    },
+    "provisionEnv": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object",
+      "description": "ProvisionEnv is extra environment for the provision command, on top of\nthe deployment outputs it already receives. Reach for it when a migration\nneeds something the deployment did not record — a Key Vault secret, or a\nvalue that differs per caller.\n\nSubstitutions: ${output:NAME} for a deployment output, ${secret:name} for\na Key Vault secret, ${env:NAME} for the caller's own environment (with\n${env:NAME|fallback}), plus ${url}, ${database} and ${pr}."
+    },
+    "dockerfile": {
+      "type": "string",
+      "description": "Dockerfile relative to the repository root."
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "previewEnvironment"
+  ],
+  "title": "azd preview configuration",
+  "description": "Per-pull-request preview environments, read by the obtai.preview azd extension."
+}

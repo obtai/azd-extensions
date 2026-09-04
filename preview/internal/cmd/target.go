@@ -7,9 +7,9 @@ import (
 
 	"github.com/azure/azure-dev/cli/azd/pkg/azdext"
 
-	"obtai.preview/internal/azure"
-	"obtai.preview/internal/config"
-	"obtai.preview/internal/preview"
+	"github.com/obtai/azd-extensions/preview/internal/azure"
+	"github.com/obtai/azd-extensions/preview/internal/config"
+	"github.com/obtai/azd-extensions/preview/internal/preview"
 )
 
 // outputs reads an azd environment's deployment outputs.
