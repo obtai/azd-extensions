@@ -46,7 +46,6 @@ type Target struct {
 	Project   string
 	SourceApp string
 	Domain    string
-	Registry  string
 	Login     string
 	Server    string
 	Vault     string
@@ -120,7 +119,7 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 	image := fmt.Sprintf("%s/%s", t.Login, repositoryTag)
 
 	fmt.Printf("==> Building %s\n", image)
-	if err := t.Clients.BuildImage(ctx, t.Registry, repositoryTag, t.Config.Dockerfile, ".", map[string]string{
+	if err := t.Clients.BuildImage(ctx, t.Login, image, t.Config.Dockerfile, ".", map[string]string{
 		"BUILD_SHA": sha,
 		"BUILD_REF": ref,
 		"BUILD_PR":  fmt.Sprint(pr),

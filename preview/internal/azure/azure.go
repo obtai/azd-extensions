@@ -12,7 +12,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/appcontainers/armappcontainers/v3"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerregistry/armcontainerregistry"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/postgresql/armpostgresqlflexibleservers/v4"
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
 )
@@ -26,8 +25,6 @@ type Clients struct {
 
 	ContainerApps *armappcontainers.ContainerAppsClient
 	Revisions     *armappcontainers.ContainerAppsRevisionsClient
-	Registries    *armcontainerregistry.RegistriesClient
-	Runs          *armcontainerregistry.RunsClient
 	Databases     *armpostgresqlflexibleservers.DatabasesClient
 }
 
@@ -42,10 +39,6 @@ func New(ctx context.Context, subscriptionID, resourceGroup string) (*Clients, e
 	if err != nil {
 		return nil, err
 	}
-	registry, err := armcontainerregistry.NewClientFactory(subscriptionID, credential, nil)
-	if err != nil {
-		return nil, err
-	}
 	postgres, err := armpostgresqlflexibleservers.NewClientFactory(subscriptionID, credential, nil)
 	if err != nil {
 		return nil, err
@@ -57,8 +50,6 @@ func New(ctx context.Context, subscriptionID, resourceGroup string) (*Clients, e
 		credential:     credential,
 		ContainerApps:  apps.NewContainerAppsClient(),
 		Revisions:      apps.NewContainerAppsRevisionsClient(),
-		Registries:     registry.NewRegistriesClient(),
-		Runs:           registry.NewRunsClient(),
 		Databases:      postgres.NewDatabasesClient(),
 	}, nil
 }

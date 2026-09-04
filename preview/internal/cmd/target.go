@@ -102,12 +102,9 @@ func targetFor(
 	if err != nil {
 		return nil, err
 	}
-	// Scheduling a build wants the registry's resource name; listing and
-	// deleting tags want the login server above.
-	registry, err := require(values, prefix+"_ACR_NAME", environment)
-	if err != nil {
-		return nil, err
-	}
+	// The registry's ARM resource name is no longer needed: building, pushing,
+	// listing and deleting tags all go through the login server above. It was
+	// only ever wanted for scheduling an ACR Tasks run.
 
 	clients, err := azure.New(ctx, subscription, group)
 	if err != nil {
@@ -120,7 +117,6 @@ func targetFor(
 		Project:   name,
 		SourceApp: sourceApp,
 		Domain:    domain,
-		Registry:  registry,
 		Login:     login,
 		Server:    values[prefix+"_POSTGRES_SERVER_NAME"],
 		Vault:     values[prefix+"_KEY_VAULT_NAME"],
