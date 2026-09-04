@@ -33,7 +33,13 @@ else
     )
 fi
 
-APP_PATH="$EXTENSION_ID/internal/cmd"
+# The -X target is a PACKAGE path, and it stopped matching EXTENSION_ID when the
+# module became github.com/obtai/azd-extensions/preview. A -X against a package
+# that does not exist is ignored without complaint, so the binary quietly kept
+# reporting version "dev". Read the real module path instead of assuming the two
+# are the same string.
+MODULE=$(awk '/^module /{print $2; exit}' go.mod)
+APP_PATH="$MODULE/internal/cmd"
 
 # Loop through platforms and build
 for PLATFORM in "${PLATFORMS[@]}"; do
