@@ -20,15 +20,24 @@ import (
 // username.
 const acrNullUser = "00000000-0000-0000-0000-000000000000"
 
-// BuildImage builds the image with the local Docker daemon — a laptop's or a
-// runner's — and pushes it.
+// builderName is the buildx builder this creates and reuses. The default
+// "docker" driver cannot export a build cache at all — it can import one and
+// then fails the build rather than skipping the export — so a container driver
+// is the price of caching anything between runs.
+const builderName = "obtai-preview"
+
+// BuildImage builds the image and pushes it, reusing a layer cache kept in the
+// registry.
+//
+// The cache is what makes this worth doing on a CI runner, where the machine is
+// thrown away after every job and the local layer cache is therefore always
+// empty. It lives beside the images it caches, at <repository>:buildcache.
 //
 // This used to build with ACR Tasks, which kept Docker off the machine
 // entirely. The trade was that the build became invisible: a task run streams
 // to a log blob nobody is watching, so a broken Dockerfile arrived as a status
 // word and the log had to be fetched afterwards to find out why. Building here
-// puts the output on stdout where it is legible, and reuses whatever layer
-// cache the daemon already has.
+// puts the output on stdout where it is legible.
 //
 // Docker reads .dockerignore itself, which is why this no longer packs its own
 // tarball — and why it no longer has to special-case keeping the Dockerfile in
@@ -44,15 +53,38 @@ func (c *Clients) BuildImage(
 	if err := c.dockerLogin(ctx, loginServer); err != nil {
 		return err
 	}
+	if err := ensureBuilder(ctx); err != nil {
+		return err
+	}
+
+	cache := cacheRef(image)
 
 	args := []string{
-		"build",
+		"buildx", "build",
+		"--builder", builderName,
 		// The container app runs linux/amd64. Without this an arm64 laptop
 		// builds for itself and pushes an image the app cannot start, with
 		// nothing failing until the revision refuses to come up.
 		"--platform", "linux/amd64",
 		"--file", dockerfile,
 		"--tag", image,
+		// Straight to the registry. A container builder keeps nothing in the
+		// local image store, so exporting there first would be a write nobody
+		// reads — it was the single slowest step of a build.
+		"--push",
+		"--cache-from", "type=registry,ref=" + cache,
+		// mode=max caches intermediate stages too. The expensive one here is
+		// `npm ci`, which lives in a stage the final image only copies from, so
+		// the default mode=min would cache none of it.
+		//
+		// image-manifest + oci-mediatypes write the cache as an OCI image
+		// manifest rather than an image index, which is the form registries
+		// that reject the index format accept.
+		//
+		// ignore-error because a registry that refuses the cache must degrade
+		// to a slow build, not a failed one.
+		"--cache-to", "type=registry,ref=" + cache +
+			",mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true",
 	}
 
 	// Sorted, so a rebuild with the same inputs produces the same command.
@@ -70,8 +102,33 @@ func (c *Clients) BuildImage(
 	if err := docker(ctx, args...); err != nil {
 		return fmt.Errorf("building %s: %w", image, err)
 	}
-	if err := docker(ctx, "push", image); err != nil {
-		return fmt.Errorf("pushing %s: %w", image, err)
+	return nil
+}
+
+// cacheRef is the image reference with its tag replaced by "buildcache", so the
+// cache sits in the same repository as the images.
+//
+// Teardown deletes tags matching the pull request's own prefix, so this one is
+// never swept up with them. Two previews building at once both write it and the
+// last one wins, which costs a cache generation rather than correctness.
+func cacheRef(image string) string {
+	if at := strings.LastIndex(image, ":"); at > strings.LastIndex(image, "/") {
+		return image[:at] + ":buildcache"
+	}
+	return image + ":buildcache"
+}
+
+// ensureBuilder creates the container-driver builder once and reuses it after.
+// Creating it costs a few seconds on a fresh machine and nothing on a warm one.
+func ensureBuilder(ctx context.Context) error {
+	if exec.CommandContext(ctx, "docker", "buildx", "inspect", builderName).Run() == nil {
+		return nil
+	}
+	create := exec.CommandContext(ctx, "docker", "buildx", "create",
+		"--name", builderName, "--driver", "docker-container")
+	if output, err := create.CombinedOutput(); err != nil {
+		return fmt.Errorf("creating the %s buildx builder: %w\n%s",
+			builderName, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
