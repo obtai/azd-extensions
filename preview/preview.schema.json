@@ -15,14 +15,18 @@
         "type": "string"
       },
       "type": "object",
-      "description": "Env is what a preview overrides on the app it was cloned from.\nEverything else — identity, registry, secret references, probes, every\nother variable — is inherited, so a new variable in the infrastructure\nreaches previews without this file being touched.\n\n${url}, ${database} and ${pr} are substituted."
+      "description": "Env is what a preview overrides on the revision production is serving.\nEverything else — identity, registry, secret references, probes, every\nother variable — is inherited, so a new variable in the infrastructure\nreaches previews without this file being touched.\n\n${url}, ${database}, ${label} and ${pr} are substituted."
     },
     "provisionEnv": {
       "additionalProperties": {
         "type": "string"
       },
       "type": "object",
-      "description": "ProvisionEnv is extra environment for the provision command, on top of\nthe deployment outputs it already receives. Reach for it when a migration\nneeds something the deployment did not record — a Key Vault secret, or a\nvalue that differs per caller.\n\nSubstitutions: ${output:NAME} for a deployment output, ${secret:name} for\na Key Vault secret, ${env:NAME} for the caller's own environment (with\n${env:NAME|fallback}), plus ${url}, ${database} and ${pr}."
+      "description": "ProvisionEnv is extra environment for the provision command, on top of\nthe deployment outputs it already receives. Reach for it when a migration\nneeds something the deployment did not record — a Key Vault secret, or a\nvalue that differs per caller.\n\nSubstitutions: ${output:NAME} for a deployment output, ${secret:name} for\na Key Vault secret, ${env:NAME} for the caller's own environment (with\n${env:NAME|fallback}), plus ${url}, ${database}, ${label} and ${pr}."
+    },
+    "liveLabel": {
+      "type": "string",
+      "description": "LiveLabel is the revision label carrying production traffic on the app\npreviews are added to. Defaults to `live`.\n\nA preview is a zero-traffic revision of that app, so the extension has to\nknow which revision production is actually on: it is the template a\npreview is derived from, and the one the app is restored to afterwards.\nNaming it beats reading the traffic split, because a label says which\nrevision is deliberate where a weight of 100 says only which one won."
     },
     "dockerfile": {
       "type": "string",

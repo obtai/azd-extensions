@@ -38,12 +38,12 @@ type Config struct {
 	// so it authenticates as the CALLER rather than as the app.
 	Provision string `yaml:"provision"`
 
-	// Env is what a preview overrides on the app it was cloned from.
+	// Env is what a preview overrides on the revision production is serving.
 	// Everything else — identity, registry, secret references, probes, every
 	// other variable — is inherited, so a new variable in the infrastructure
 	// reaches previews without this file being touched.
 	//
-	// ${url}, ${database} and ${pr} are substituted.
+	// ${url}, ${database}, ${label} and ${pr} are substituted.
 	Env map[string]string `yaml:"env"`
 
 	// ProvisionEnv is extra environment for the provision command, on top of
@@ -53,8 +53,18 @@ type Config struct {
 	//
 	// Substitutions: ${output:NAME} for a deployment output, ${secret:name} for
 	// a Key Vault secret, ${env:NAME} for the caller's own environment (with
-	// ${env:NAME|fallback}), plus ${url}, ${database} and ${pr}.
+	// ${env:NAME|fallback}), plus ${url}, ${database}, ${label} and ${pr}.
 	ProvisionEnv map[string]string `yaml:"provisionEnv"`
+
+	// LiveLabel is the revision label carrying production traffic on the app
+	// previews are added to. Defaults to `live`.
+	//
+	// A preview is a zero-traffic revision of that app, so the extension has to
+	// know which revision production is actually on: it is the template a
+	// preview is derived from, and the one the app is restored to afterwards.
+	// Naming it beats reading the traffic split, because a label says which
+	// revision is deliberate where a weight of 100 says only which one won.
+	LiveLabel string `yaml:"liveLabel"`
 
 	// Dockerfile relative to the repository root.
 	Dockerfile string `yaml:"dockerfile"`
@@ -91,6 +101,9 @@ func Load(dir string) (*Config, error) {
 	if config.Dockerfile == "" {
 		config.Dockerfile = "Dockerfile"
 	}
+	if config.LiveLabel == "" {
+		config.LiveLabel = "live"
+	}
 
 	return &config, nil
 }
@@ -100,17 +113,19 @@ type Vars struct {
 	PR       int
 	URL      string
 	Database string
+	Label    string
 	Outputs  map[string]string
 	Secret   func(name string) (string, error)
 }
 
 var reference = regexp.MustCompile(`\$\{([a-z]+):([^}|]+)(?:\|([^}]*))?\}`)
 
-// Expand substitutes ${url}, ${database} and ${pr}.
+// Expand substitutes ${url}, ${database}, ${label} and ${pr}.
 func Expand(values map[string]string, vars Vars) map[string]string {
 	replacer := strings.NewReplacer(
 		"${url}", vars.URL,
 		"${database}", vars.Database,
+		"${label}", vars.Label,
 		"${pr}", fmt.Sprint(vars.PR),
 	)
 

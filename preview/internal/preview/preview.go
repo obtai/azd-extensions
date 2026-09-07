@@ -1,15 +1,29 @@
 // Package preview creates and destroys per-pull-request preview environments.
 //
-// Each pull request gets its own container app in an existing environment,
-// served at https://ca-<project>-pr-<n>.<environment default domain> and
-// sharing everything expensive: the Container Apps environment, the database
-// server, the registry, the managed identity, the Key Vault.
+// Each pull request gets a zero-traffic REVISION of the primary app, labelled
+// `pr-<n>` and served at its label's own FQDN,
+// https://<app>---pr-<n>.<environment default domain>. It shares everything the
+// app has: the Container Apps environment, the ingress and its certificate, the
+// identity, the registry, the secret references, the probes.
 //
-// An app rather than a zero-traffic revision of the primary app, because
-// revisions are immutable: the second push to a pull request would find an
-// identical template, create nothing, and return success while serving the
-// first build forever. An app keeps the URL stable while the image tag changes
-// per push.
+// This was an app per pull request, because a first attempt at revisions used a
+// deterministic revision SUFFIX and revisions are immutable: the second push
+// found an identical template, created nothing, and returned success while
+// serving the first build forever. A LABEL fixes that properly. The label is the
+// name that must stay stable, so it carries the URL; the suffix is the name that
+// must change every push, so it carries the commit. The first attempt made one
+// name do both jobs, which is why it could not work.
+//
+// THE HAZARD. A revision is minted from the APP's template, so writing a preview
+// revision necessarily writes APP_ENV=preview and the pull request's database
+// name onto the shared app. If the next production release patches only the
+// image — which is what `azd deploy` does — production inherits them. So the
+// app template is put back to the live revision's template immediately after the
+// preview revision exists (see restore, below). Container Apps declines to mint
+// a revision whose template matches an existing one, so the restore costs
+// nothing and creates nothing. The consuming repository is expected to carry a
+// second, independent check before it moves the live label; this one is not
+// load-bearing alone.
 package preview
 
 import (
@@ -36,7 +50,9 @@ const (
 	serveInterval = 5 * time.Second
 )
 
-var appNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*[a-z0-9]$`)
+// A revision label may not contain two consecutive dashes and is capped at 64
+// characters. A revision name — <app>--<suffix> — is capped at 64 too.
+var labelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // Target is everything a preview needs to know about where it is going. Every
 // field comes from a deployment output.
@@ -57,6 +73,7 @@ func (t *Target) vars(pr int, names Names) config.Vars {
 		PR:       pr,
 		URL:      names.URL,
 		Database: names.Database,
+		Label:    names.Label,
 		Outputs:  t.Outputs,
 		Secret:   t.secret,
 	}
@@ -80,41 +97,58 @@ func (t *Target) secret(name string) (string, error) {
 	return *response.Value, nil
 }
 
-// Names are everything derived from a pull request number.
+// Names are everything derived from a pull request number. Deliberately free of
+// the commit: `azd preview url` answers before a build exists, and the URL is a
+// label, which does not move.
 type Names struct {
-	App       string
-	URL       string
-	Database  string
-	TagPrefix string
+	App          string
+	Label        string
+	URL          string
+	Database     string
+	TagPrefix    string
+	SuffixPrefix string
 }
 
 func (t *Target) Names(pr int) Names {
-	app := fmt.Sprintf("ca-%s-pr-%d", t.Project, pr)
+	label := fmt.Sprintf("pr-%d", pr)
 	return Names{
-		App:       app,
-		URL:       fmt.Sprintf("https://%s.%s", app, t.Domain),
-		Database:  fmt.Sprintf("%s_pr_%d", t.Project, pr),
-		TagPrefix: fmt.Sprintf("pr-%d-", pr),
+		App:   t.SourceApp,
+		Label: label,
+		// Three dashes: a label's FQDN, not a revision's, which takes two.
+		URL:          fmt.Sprintf("https://%s---%s.%s", t.SourceApp, label, t.Domain),
+		Database:     fmt.Sprintf("%s_pr_%d", t.Project, pr),
+		TagPrefix:    fmt.Sprintf("pr-%d-", pr),
+		SuffixPrefix: fmt.Sprintf("pr%d-", pr),
 	}
 }
 
+// revisionName is what Container Apps calls the revision a suffix produces.
+func revisionName(app, suffix string) string { return app + "--" + suffix }
+
 // Create builds this push's image, migrates the pull request's database, and
-// creates or updates its app.
+// points the pull request's label at a new revision serving it.
 func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, error) {
 	names := t.Names(pr)
 
-	// Container app names are capped at 32 characters.
-	if len(names.App) > 32 || !appNamePattern.MatchString(names.App) {
-		return names, fmt.Errorf("invalid container app name %q", names.App)
+	if len(names.Label) > 64 || strings.Contains(names.Label, "--") ||
+		!labelPattern.MatchString(names.Label) {
+		return names, fmt.Errorf("invalid revision label %q", names.Label)
 	}
 
-	// The tag must differ per push: Container Apps creates a revision only when
-	// the template changes, and an unchanged tag string is an unchanged
-	// template whatever digest it now points at.
+	// The suffix must differ per push: Container Apps mints a revision only when
+	// the template changes, and an unchanged tag string is an unchanged template
+	// whatever digest it now points at. This is the failure the package comment
+	// describes, and the stamp is what prevents it.
 	stamp := time.Now().UTC().Format("20060102150405")
 	if sha != "" {
 		stamp = sha[:min(7, len(sha))]
 	}
+	suffix := names.SuffixPrefix + stamp
+	revision := revisionName(names.App, suffix)
+	if len(revision) > 64 {
+		return names, fmt.Errorf("revision name %q is over 64 characters", revision)
+	}
+
 	repositoryTag := fmt.Sprintf("%s:%s%s", t.Project, names.TagPrefix, stamp)
 	image := fmt.Sprintf("%s/%s", t.Login, repositoryTag)
 
@@ -134,50 +168,58 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 		}
 	}
 
-	existing, err := t.app(ctx, names.App)
+	app, err := t.app(ctx, names.App)
+	if err != nil {
+		return names, err
+	}
+	if app == nil {
+		return names, fmt.Errorf("no app %s to add a preview revision to", names.App)
+	}
+	if err := multipleRevisionMode(app); err != nil {
+		return names, err
+	}
+
+	// The LIVE revision's template, not the app's. The app's is shared mutable
+	// state — a concurrent preview may have it mid-restore — while the live
+	// revision is exactly what production is serving.
+	live, liveTemplate, err := t.liveRevision(ctx, app)
 	if err != nil {
 		return names, err
 	}
 
-	if existing != nil {
-		// Read, mutate and write the whole app: a partial template drops the
-		// probes, environment and resources alongside the image.
-		fmt.Printf("==> Updating %s\n", names.App)
-		if existing.Properties == nil || existing.Properties.Template == nil ||
-			len(existing.Properties.Template.Containers) == 0 {
-			return names, fmt.Errorf("%s has no containers", names.App)
-		}
-		existing.Properties.Template.Containers[0].Image = to.Ptr(image)
-		if err := t.put(ctx, names.App, *existing); err != nil {
-			return names, err
-		}
-	} else {
-		fmt.Printf("==> Creating %s\n", names.App)
-		source, err := t.app(ctx, t.SourceApp)
-		if err != nil {
-			return names, err
-		}
-		if source == nil {
-			return names, fmt.Errorf("no app %s to clone a preview from", t.SourceApp)
-		}
-		overrides := config.Expand(t.Config.Env, t.vars(pr, names))
-		if err := t.put(ctx, names.App, clone(*source, image, overrides)); err != nil {
-			return names, err
-		}
+	fmt.Printf("==> Creating %s\n", revision)
+	overrides := config.Expand(t.Config.Env, t.vars(pr, names))
+	app.Properties.Template = previewTemplate(liveTemplate, image, overrides, suffix)
+	if err := t.put(ctx, names.App, *app); err != nil {
+		return names, err
 	}
 
-	// Container Apps silently declines to create a revision whose template
-	// matches the running one, so a successful call is not evidence.
-	running, err := t.app(ctx, names.App)
+	// The revision has to exist before a label can point at it. Restoring the
+	// template and moving the label are the same PUT, so the app spends one
+	// round trip holding the preview's environment rather than two.
+	fmt.Printf("==> Labelling %s and restoring %s\n", names.Label, names.App)
+	app, err = t.app(ctx, names.App)
 	if err != nil {
 		return names, err
 	}
-	if got := runningImage(running); got != image {
-		return names, fmt.Errorf("%s is serving %q, expected %q", names.App, got, image)
+	app.Properties.Template = liveTemplate
+	app.Properties.Configuration.Ingress.Traffic = withLabel(
+		app.Properties.Configuration.Ingress.Traffic, names.Label, revision)
+	if err := t.put(ctx, names.App, *app); err != nil {
+		return names, err
+	}
+
+	if err := t.verify(ctx, names.App, revision, image, live); err != nil {
+		return names, err
+	}
+
+	if err := azure.WaitHealthy(ctx, t.Clients, names.App, revision); err != nil {
+		return names, err
 	}
 
 	// The pull request comment goes up the moment this returns. Not fatal on
-	// timeout: a cold app that is slow to warm is worth a note, not a failure.
+	// timeout: a cold revision that is slow to warm is worth a note, not a
+	// failure.
 	fmt.Printf("==> Waiting for %s\n", names.URL)
 	if !azure.Until(ctx, serveTimeout, serveInterval, func(ctx context.Context) bool {
 		return serving(ctx, names.URL)
@@ -189,26 +231,79 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 	return names, nil
 }
 
+// verify proves the revision exists and serves this push's image, and that the
+// restore actually restored. Container Apps declines to mint a revision whose
+// template matches an existing one, so a successful PUT is not evidence.
+func (t *Target) verify(ctx context.Context, app, revision, image, live string) error {
+	response, err := t.Clients.Revisions.GetRevision(ctx, t.Clients.ResourceGroup, app, revision, nil)
+	if err != nil {
+		if azure.NotFound(err) {
+			return fmt.Errorf("%s was not created — the template matched an existing revision", revision)
+		}
+		return err
+	}
+	if got := templateImage(response.Properties.Template); got != image {
+		return fmt.Errorf("%s is serving %q, expected %q", revision, got, image)
+	}
+
+	// The hazard, checked rather than assumed: the app must be back on the live
+	// revision's template, or the next release inherits this preview's database.
+	current, err := t.app(ctx, app)
+	if err != nil {
+		return err
+	}
+	liveResponse, err := t.Clients.Revisions.GetRevision(ctx, t.Clients.ResourceGroup, app, live, nil)
+	if err != nil {
+		return err
+	}
+	want := templateImage(liveResponse.Properties.Template)
+	if got := templateImage(current.Properties.Template); got != want {
+		return fmt.Errorf(
+			"%s is left holding %q rather than %s's %q — restore it before releasing",
+			app, got, live, want)
+	}
+	return nil
+}
+
 // Destroy removes everything a pull request created.
 func (t *Target) Destroy(ctx context.Context, pr int) error {
 	names := t.Names(pr)
 
-	fmt.Println("==> App")
-	existing, err := t.app(ctx, names.App)
+	fmt.Println("==> Label")
+	app, err := t.app(ctx, names.App)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
+	if app == nil {
 		fmt.Printf("    no %s\n", names.App)
+	} else if traffic := app.Properties.Configuration.Ingress.Traffic; hasLabel(traffic, names.Label) {
+		app.Properties.Configuration.Ingress.Traffic = withoutLabel(traffic, names.Label)
+		if err := t.put(ctx, names.App, *app); err != nil {
+			return err
+		}
+		fmt.Printf("    removed %s\n", names.Label)
 	} else {
-		poller, err := t.Clients.ContainerApps.BeginDelete(ctx, t.Clients.ResourceGroup, names.App, nil)
-		if err != nil {
+		fmt.Printf("    no %s\n", names.Label)
+	}
+
+	// Deactivating stops the replicas and the billing. It does NOT free the
+	// revision slot: an app holds 100 revisions, active and inactive, and the
+	// oldest are purged past that. maxInactiveRevisions on the app is what stops
+	// pull request churn evicting rollback history.
+	fmt.Println("==> Revisions")
+	revisions, err := t.revisionsWithPrefix(ctx, names.App, revisionName(names.App, names.SuffixPrefix))
+	if err != nil {
+		return err
+	}
+	for _, revision := range revisions {
+		if _, err := t.Clients.Revisions.DeactivateRevision(
+			ctx, t.Clients.ResourceGroup, names.App, revision, nil); err != nil {
 			return err
 		}
-		if _, err := poller.PollUntilDone(ctx, nil); err != nil {
-			return err
-		}
-		fmt.Printf("    deleted %s\n", names.App)
+		fmt.Printf("    deactivated %s\n", revision)
+	}
+	if len(revisions) == 0 {
+		fmt.Printf("    none matching %s*\n", revisionName(names.App, names.SuffixPrefix))
 	}
 
 	fmt.Println("==> Database")
@@ -234,6 +329,118 @@ func (t *Target) Destroy(ctx context.Context, pr int) error {
 		fmt.Printf("    none matching %s*\n", names.TagPrefix)
 	}
 	return nil
+}
+
+// multipleRevisionMode refuses to touch an app that cannot hold a preview. In
+// single-revision mode a new revision takes all the traffic, so getting this
+// wrong would put a pull request on the front door.
+func multipleRevisionMode(app *armappcontainers.ContainerApp) error {
+	if app.Properties == nil || app.Properties.Configuration == nil ||
+		app.Properties.Configuration.Ingress == nil {
+		return fmt.Errorf("%s has no ingress", *app.Name)
+	}
+	mode := app.Properties.Configuration.ActiveRevisionsMode
+	if mode == nil || *mode != armappcontainers.ActiveRevisionsModeMultiple {
+		return fmt.Errorf(
+			"%s is not in multiple-revision mode — a preview revision would take production's traffic",
+			*app.Name)
+	}
+	return nil
+}
+
+// liveRevision is the revision holding the live label, and its template. Falls
+// back to the latest revision on an app whose label has never been assigned,
+// which is the state a freshly provisioned environment is in.
+func (t *Target) liveRevision(
+	ctx context.Context, app *armappcontainers.ContainerApp,
+) (string, *armappcontainers.Template, error) {
+	name := ""
+	for _, weight := range app.Properties.Configuration.Ingress.Traffic {
+		if weight != nil && weight.Label != nil && *weight.Label == t.Config.LiveLabel &&
+			weight.RevisionName != nil {
+			name = *weight.RevisionName
+			break
+		}
+	}
+	if name == "" && app.Properties.LatestRevisionName != nil {
+		name = *app.Properties.LatestRevisionName
+		fmt.Printf("    no revision labelled %s — falling back to %s\n", t.Config.LiveLabel, name)
+	}
+	if name == "" {
+		return "", nil, fmt.Errorf("%s has no revisions to base a preview on", *app.Name)
+	}
+
+	response, err := t.Clients.Revisions.GetRevision(ctx, t.Clients.ResourceGroup, *app.Name, name, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	if response.Properties == nil || response.Properties.Template == nil {
+		return "", nil, fmt.Errorf("%s has no template", name)
+	}
+
+	// The suffix is not always populated on a fetched revision, and a restore
+	// whose suffix differs would mint a revision rather than match one.
+	template := response.Properties.Template
+	template.RevisionSuffix = to.Ptr(strings.TrimPrefix(name, *app.Name+"--"))
+	return name, template, nil
+}
+
+func (t *Target) revisionsWithPrefix(ctx context.Context, app, prefix string) ([]string, error) {
+	var found []string
+	pager := t.Clients.Revisions.NewListRevisionsPager(t.Clients.ResourceGroup, app, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, revision := range page.Value {
+			if revision == nil || revision.Name == nil || !strings.HasPrefix(*revision.Name, prefix) {
+				continue
+			}
+			// Deactivating an inactive revision is an error, not a no-op.
+			if revision.Properties != nil && revision.Properties.Active != nil &&
+				!*revision.Properties.Active {
+				continue
+			}
+			found = append(found, *revision.Name)
+		}
+	}
+	return found, nil
+}
+
+// withLabel points a label at a revision at zero weight, leaving every other
+// entry — and so the traffic split — exactly as it was.
+func withLabel(
+	traffic []*armappcontainers.TrafficWeight, label, revision string,
+) []*armappcontainers.TrafficWeight {
+	kept := withoutLabel(traffic, label)
+	return append(kept, &armappcontainers.TrafficWeight{
+		RevisionName: to.Ptr(revision),
+		Weight:       to.Ptr(int32(0)),
+		Label:        to.Ptr(label),
+	})
+}
+
+func withoutLabel(
+	traffic []*armappcontainers.TrafficWeight, label string,
+) []*armappcontainers.TrafficWeight {
+	kept := make([]*armappcontainers.TrafficWeight, 0, len(traffic))
+	for _, weight := range traffic {
+		if weight != nil && weight.Label != nil && *weight.Label == label {
+			continue
+		}
+		kept = append(kept, weight)
+	}
+	return kept
+}
+
+func hasLabel(traffic []*armappcontainers.TrafficWeight, label string) bool {
+	for _, weight := range traffic {
+		if weight != nil && weight.Label != nil && *weight.Label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Target) app(ctx context.Context, name string) (*armappcontainers.ContainerApp, error) {
@@ -333,13 +540,12 @@ func (t *Target) dropDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
-func runningImage(app *armappcontainers.ContainerApp) string {
-	if app == nil || app.Properties == nil || app.Properties.Template == nil ||
-		len(app.Properties.Template.Containers) == 0 ||
-		app.Properties.Template.Containers[0].Image == nil {
+func templateImage(template *armappcontainers.Template) string {
+	if template == nil || len(template.Containers) == 0 || template.Containers[0] == nil ||
+		template.Containers[0].Image == nil {
 		return ""
 	}
-	return *app.Properties.Template.Containers[0].Image
+	return *template.Containers[0].Image
 }
 
 func serving(ctx context.Context, url string) bool {
@@ -356,20 +562,24 @@ func serving(ctx context.Context, url string) bool {
 	return response.StatusCode == http.StatusOK
 }
 
-// clone derives a preview app from the app it previews, rather than restating
-// its identity, registry, secret references and probes in a config file that
-// would drift.
-func clone(source armappcontainers.ContainerApp, image string, overrides map[string]string) armappcontainers.ContainerApp {
-	container := source.Properties.Template.Containers[0]
+// previewTemplate derives a preview revision from the template production is
+// serving, rather than restating probes, resources and environment in a config
+// file that would drift. A revision inherits the app's identity, registries and
+// secret references natively, so unlike an app per pull request there is nothing
+// to copy but the template itself.
+func previewTemplate(
+	live *armappcontainers.Template, image string, overrides map[string]string, suffix string,
+) *armappcontainers.Template {
+	source := live.Containers[0]
 
 	pending := make(map[string]string, len(overrides))
 	for key, value := range overrides {
 		pending[key] = value
 	}
 
-	env := make([]*armappcontainers.EnvironmentVar, 0, len(container.Env)+len(pending))
-	for _, entry := range container.Env {
-		if entry.Name != nil {
+	env := make([]*armappcontainers.EnvironmentVar, 0, len(source.Env)+len(pending))
+	for _, entry := range source.Env {
+		if entry != nil && entry.Name != nil {
 			if value, ok := pending[*entry.Name]; ok {
 				env = append(env, &armappcontainers.EnvironmentVar{
 					Name:  entry.Name,
@@ -385,53 +595,19 @@ func clone(source armappcontainers.ContainerApp, image string, overrides map[str
 		env = append(env, &armappcontainers.EnvironmentVar{Name: to.Ptr(key), Value: to.Ptr(value)})
 	}
 
-	// Only the identity names carry over; the ids are read-only on create.
-	var identity *armappcontainers.ManagedServiceIdentity
-	if source.Identity != nil {
-		assigned := map[string]*armappcontainers.UserAssignedIdentity{}
-		for id := range source.Identity.UserAssignedIdentities {
-			assigned[id] = &armappcontainers.UserAssignedIdentity{}
-		}
-		identity = &armappcontainers.ManagedServiceIdentity{
-			Type:                   source.Identity.Type,
-			UserAssignedIdentities: assigned,
-		}
-	}
-
-	ingress := source.Properties.Configuration.Ingress
-
-	return armappcontainers.ContainerApp{
-		Location: source.Location,
-		Identity: identity,
-		Properties: &armappcontainers.ContainerAppProperties{
-			EnvironmentID:       source.Properties.EnvironmentID,
-			WorkloadProfileName: source.Properties.WorkloadProfileName,
-			Configuration: &armappcontainers.Configuration{
-				// Single: a preview has one thing to serve.
-				ActiveRevisionsMode: to.Ptr(armappcontainers.ActiveRevisionsModeSingle),
-				Ingress: &armappcontainers.Ingress{
-					External:      ingress.External,
-					TargetPort:    ingress.TargetPort,
-					Transport:     ingress.Transport,
-					AllowInsecure: ingress.AllowInsecure,
-				},
-				Registries: source.Properties.Configuration.Registries,
-				Secrets:    source.Properties.Configuration.Secrets,
-			},
-			Template: &armappcontainers.Template{
-				Containers: []*armappcontainers.Container{{
-					Name:      container.Name,
-					Image:     to.Ptr(image),
-					Resources: container.Resources,
-					Probes:    container.Probes,
-					Env:       env,
-				}},
-				// Scales to zero, so an idle preview costs nothing.
-				Scale: &armappcontainers.Scale{
-					MinReplicas: to.Ptr(int32(0)),
-					MaxReplicas: to.Ptr(int32(1)),
-				},
-			},
+	return &armappcontainers.Template{
+		RevisionSuffix: to.Ptr(suffix),
+		Containers: []*armappcontainers.Container{{
+			Name:      source.Name,
+			Image:     to.Ptr(image),
+			Resources: source.Resources,
+			Probes:    source.Probes,
+			Env:       env,
+		}},
+		// Scales to zero, so an idle preview costs nothing.
+		Scale: &armappcontainers.Scale{
+			MinReplicas: to.Ptr(int32(0)),
+			MaxReplicas: to.Ptr(int32(1)),
 		},
 	}
 }

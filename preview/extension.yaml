@@ -20,4 +20,4 @@ id: obtai.preview
 language: go
 namespace: preview
 usage: azd preview <command> [options]
-version: 0.3.0
+version: 0.4.0
