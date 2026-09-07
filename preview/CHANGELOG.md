@@ -1,5 +1,45 @@
 # Release History
 
+## 0.5.0
+
+### Features Added
+
+- `previewApp` in `preview.yaml` names the container app preview revisions are
+  added to. Unset, it is the app the azd service deploys, which is 0.4.0's
+  behaviour — so existing consumers are unaffected.
+
+  Prefer a **dedicated** app, declared by the repository's own infrastructure.
+  A revision is minted from its app's template, so a preview necessarily writes
+  its own `APP_ENV` and database name onto whichever app hosts it. On an app of
+  its own that is harmless: nothing else deploys there, and everything a preview
+  changes, the next preview changes again. On the app serving production it is
+  not.
+
+- Two shapes now fall out of one mechanism — previews are labelled revisions of
+  a named non-production app:
+  - **prod + preview**, for an app that does not warrant its own environment: a
+    bare preview app beside production, sharing the database server, registry,
+    vault and identity, scaled to zero.
+  - **prod and dev + preview**, for one that does: `previewEnvironment` already
+    points previews at another azd environment, and dev is the preview host.
+
+### Bugs Fixed
+
+- The restore no longer reuses the live revision's suffix. Container Apps
+  rejects a PUT naming a suffix that already exists — "revision with suffix X
+  already exists" — rather than treating it as the no-op it looks like, so the
+  restore failed and left the preview's database name on the app serving
+  production. The suffix is cleared and Container Apps generates one.
+
+### Other Changes
+
+- The restore, and the check that it worked, are **skipped entirely when
+  `previewApp` names an app of its own**. That also removes the revision it
+  minted on every push, which on a shared app competes with `maxInactiveRevisions`
+  for the slots holding rollback history.
+- `Target.SourceApp` is now `ServiceApp` (what azd deploys) alongside
+  `PreviewApp` (what previews are added to).
+
 ## 0.4.0
 
 ### Breaking Changes

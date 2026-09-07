@@ -1,8 +1,8 @@
 // Package preview creates and destroys per-pull-request preview environments.
 //
-// Each pull request gets a zero-traffic REVISION of the primary app, labelled
+// Each pull request gets a zero-traffic REVISION of a container app, labelled
 // `pr-<n>` and served at its label's own FQDN,
-// https://<app>---pr-<n>.<environment default domain>. It shares everything the
+// https://<app>---pr-<n>.<environment default domain>. It shares everything that
 // app has: the Container Apps environment, the ingress and its certificate, the
 // identity, the registry, the secret references, the probes.
 //
@@ -14,16 +14,28 @@
 // must change every push, so it carries the commit. The first attempt made one
 // name do both jobs, which is why it could not work.
 //
-// THE HAZARD. A revision is minted from the APP's template, so writing a preview
-// revision necessarily writes APP_ENV=preview and the pull request's database
-// name onto the shared app. If the next production release patches only the
-// image — which is what `azd deploy` does — production inherits them. So the
-// app template is put back to the live revision's template immediately after the
-// preview revision exists (see restore, below). Container Apps declines to mint
-// a revision whose template matches an existing one, so the restore costs
-// nothing and creates nothing. The consuming repository is expected to carry a
-// second, independent check before it moves the live label; this one is not
-// load-bearing alone.
+// WHICH APP. `previewApp` in preview.yaml names it, and the choice matters more
+// than it looks, because a revision is minted from the APP's template — writing
+// a preview necessarily writes APP_ENV=preview and the pull request's database
+// name onto whatever app hosts it.
+//
+//   - A DEDICATED app, declared in the repository's own infrastructure. Nothing
+//     else deploys there, so that pollution is harmless: the only other writer is
+//     the infrastructure itself, and everything a preview changes, the next
+//     preview changes again. No restore, and the app is never anything a person
+//     is looking at.
+//
+//   - THE SERVICE APP itself, when a repository has nowhere else to put previews.
+//     Then the pollution is dangerous — a release that patches only the image,
+//     which is what `azd deploy` does, would inherit a pull request's database —
+//     so the template is put back immediately afterwards, and the consuming
+//     repository is expected to carry an independent check before it releases.
+//     The restore mints a revision of its own every push, because Container Apps
+//     only declines to mint when the template is unchanged from the app's
+//     CURRENT one, which at that moment is the preview's.
+//
+// The first is preferred, and is the reason `previewApp` exists. The second is
+// what happens when it is unset.
 package preview
 
 import (
@@ -57,16 +69,25 @@ var labelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // Target is everything a preview needs to know about where it is going. Every
 // field comes from a deployment output.
 type Target struct {
-	Clients   *azure.Clients
-	Config    *config.Config
-	Project   string
-	SourceApp string
-	Domain    string
-	Login     string
-	Server    string
-	Vault     string
-	Outputs   map[string]string
+	Clients *azure.Clients
+	Config  *config.Config
+	Project string
+	// ServiceApp is what `azd deploy` releases — the app a repository's own
+	// pipeline writes to.
+	ServiceApp string
+	// PreviewApp is what preview revisions are added to. Equal to ServiceApp
+	// unless preview.yaml names another, which is the shape to prefer.
+	PreviewApp string
+	Domain     string
+	Login      string
+	Server     string
+	Vault      string
+	Outputs    map[string]string
 }
+
+// dedicated reports whether previews have an app to themselves. When they do,
+// nothing else deploys there and the app template needs no restoring.
+func (t *Target) dedicated() bool { return t.PreviewApp != t.ServiceApp }
 
 func (t *Target) vars(pr int, names Names) config.Vars {
 	return config.Vars{
@@ -112,10 +133,10 @@ type Names struct {
 func (t *Target) Names(pr int) Names {
 	label := fmt.Sprintf("pr-%d", pr)
 	return Names{
-		App:   t.SourceApp,
+		App:   t.PreviewApp,
 		Label: label,
 		// Three dashes: a label's FQDN, not a revision's, which takes two.
-		URL:          fmt.Sprintf("https://%s---%s.%s", t.SourceApp, label, t.Domain),
+		URL:          fmt.Sprintf("https://%s---%s.%s", t.PreviewApp, label, t.Domain),
 		Database:     fmt.Sprintf("%s_pr_%d", t.Project, pr),
 		TagPrefix:    fmt.Sprintf("pr-%d-", pr),
 		SuffixPrefix: fmt.Sprintf("pr%d-", pr),
@@ -179,30 +200,48 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 		return names, err
 	}
 
-	// The LIVE revision's template, not the app's. The app's is shared mutable
-	// state — a concurrent preview may have it mid-restore — while the live
-	// revision is exactly what production is serving.
-	live, liveTemplate, err := t.liveRevision(ctx, app)
-	if err != nil {
-		return names, err
+	// Where the preview inherits from.
+	//
+	// A dedicated app: its own template, which its infrastructure owns and
+	// re-asserts. It may be carrying the last preview's values, and that is fine
+	// — everything a preview changes, a preview sets.
+	//
+	// The service app: the LIVE revision's template, not the app's. The app's is
+	// shared mutable state a concurrent preview may have mid-restore, while the
+	// live revision is exactly what is being served.
+	base := app.Properties.Template
+	live := ""
+	if !t.dedicated() {
+		live, base, err = t.liveRevision(ctx, app)
+		if err != nil {
+			return names, err
+		}
 	}
 
 	fmt.Printf("==> Creating %s\n", revision)
 	overrides := config.Expand(t.Config.Env, t.vars(pr, names))
-	app.Properties.Template = previewTemplate(liveTemplate, image, overrides, suffix)
+	app.Properties.Template = previewTemplate(base, image, overrides, suffix)
 	if err := t.put(ctx, names.App, *app); err != nil {
 		return names, err
 	}
 
-	// The revision has to exist before a label can point at it. Restoring the
-	// template and moving the label are the same PUT, so the app spends one
-	// round trip holding the preview's environment rather than two.
-	fmt.Printf("==> Labelling %s and restoring %s\n", names.Label, names.App)
+	// The revision has to exist before a label can point at it.
+	//
+	// On the service app the restore rides along in this same PUT, so the app
+	// spends one round trip holding the preview's environment rather than two —
+	// and mints a revision of its own doing it. A dedicated app is left as it is.
+	if t.dedicated() {
+		fmt.Printf("==> Labelling %s\n", names.Label)
+	} else {
+		fmt.Printf("==> Labelling %s and restoring %s\n", names.Label, names.App)
+	}
 	app, err = t.app(ctx, names.App)
 	if err != nil {
 		return names, err
 	}
-	app.Properties.Template = liveTemplate
+	if !t.dedicated() {
+		app.Properties.Template = forRestore(base)
+	}
 	app.Properties.Configuration.Ingress.Traffic = withLabel(
 		app.Properties.Configuration.Ingress.Traffic, names.Label, revision)
 	if err := t.put(ctx, names.App, *app); err != nil {
@@ -231,9 +270,13 @@ func (t *Target) Create(ctx context.Context, pr int, sha, ref string) (Names, er
 	return names, nil
 }
 
-// verify proves the revision exists and serves this push's image, and that the
-// restore actually restored. Container Apps declines to mint a revision whose
-// template matches an existing one, so a successful PUT is not evidence.
+// verify proves the revision exists and serves this push's image, and — when the
+// preview shares the service app — that the restore actually restored. Container
+// Apps declines to mint a revision whose template matches an existing one, so a
+// successful PUT is not evidence.
+//
+// `live` is empty for a dedicated app, where there is nothing to restore and so
+// nothing to check.
 func (t *Target) verify(ctx context.Context, app, revision, image, live string) error {
 	response, err := t.Clients.Revisions.GetRevision(ctx, t.Clients.ResourceGroup, app, revision, nil)
 	if err != nil {
@@ -245,9 +288,13 @@ func (t *Target) verify(ctx context.Context, app, revision, image, live string) 
 	if got := templateImage(response.Properties.Template); got != image {
 		return fmt.Errorf("%s is serving %q, expected %q", revision, got, image)
 	}
+	if live == "" {
+		return nil
+	}
 
-	// The hazard, checked rather than assumed: the app must be back on the live
-	// revision's template, or the next release inherits this preview's database.
+	// The hazard, checked rather than assumed: the service app must be back on
+	// the live revision's template, or the next release inherits this preview's
+	// database.
 	current, err := t.app(ctx, app)
 	if err != nil {
 		return err
@@ -378,11 +425,24 @@ func (t *Target) liveRevision(
 		return "", nil, fmt.Errorf("%s has no template", name)
 	}
 
-	// The suffix is not always populated on a fetched revision, and a restore
-	// whose suffix differs would mint a revision rather than match one.
-	template := response.Properties.Template
-	template.RevisionSuffix = to.Ptr(strings.TrimPrefix(name, *app.Name+"--"))
-	return name, template, nil
+	return name, forRestore(response.Properties.Template), nil
+}
+
+// forRestore prepares a fetched revision's template to be written back onto the
+// app.
+//
+// The suffix is CLEARED rather than carried over. Putting it back names a
+// revision that already exists, and Container Apps rejects that outright —
+// "revision with suffix X already exists" — rather than treating it as the
+// no-op it looks like. Without a suffix Container Apps generates one, and the
+// restore succeeds at the cost of an inactive revision. See the package comment.
+func forRestore(template *armappcontainers.Template) *armappcontainers.Template {
+	if template == nil {
+		return nil
+	}
+	restored := *template
+	restored.RevisionSuffix = nil
+	return &restored
 }
 
 func (t *Target) revisionsWithPrefix(ctx context.Context, app, prefix string) ([]string, error) {

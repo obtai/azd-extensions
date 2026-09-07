@@ -90,9 +90,29 @@ func targetFor(
 	if err != nil {
 		return nil, err
 	}
-	sourceApp, err := require(values, prefix+"_CONTAINER_APP_NAME", environment)
+	serviceApp, err := require(values, prefix+"_CONTAINER_APP_NAME", environment)
 	if err != nil {
 		return nil, err
+	}
+
+	// Which app previews land on. Defaults to the one azd deploys, which is the
+	// shape that needs the template restoring afterwards — see the preview
+	// package comment. A repository that declares an app for previews names it
+	// here and gets the simpler path.
+	previewApp := serviceApp
+	if settings.PreviewApp != "" {
+		resolved, err := config.ExpandFull(
+			map[string]string{"previewApp": settings.PreviewApp},
+			config.Vars{Outputs: values},
+		)
+		if err != nil {
+			return nil, err
+		}
+		if resolved["previewApp"] == "" {
+			return nil, fmt.Errorf(
+				"previewApp resolved to nothing — run `azd env refresh -e %s`", environment)
+		}
+		previewApp = resolved["previewApp"]
 	}
 	domain, err := require(values, prefix+"_CONTAINER_APPS_ENV_DOMAIN", environment)
 	if err != nil {
@@ -112,14 +132,15 @@ func targetFor(
 	}
 
 	return &preview.Target{
-		Clients:   clients,
-		Config:    settings,
-		Project:   name,
-		SourceApp: sourceApp,
-		Domain:    domain,
-		Login:     login,
-		Server:    values[prefix+"_POSTGRES_SERVER_NAME"],
-		Vault:     values[prefix+"_KEY_VAULT_NAME"],
-		Outputs:   values,
+		Clients:    clients,
+		Config:     settings,
+		Project:    name,
+		ServiceApp: serviceApp,
+		PreviewApp: previewApp,
+		Domain:     domain,
+		Login:      login,
+		Server:     values[prefix+"_POSTGRES_SERVER_NAME"],
+		Vault:      values[prefix+"_KEY_VAULT_NAME"],
+		Outputs:    values,
 	}, nil
 }

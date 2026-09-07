@@ -9,21 +9,23 @@ import (
 
 func TestNames(t *testing.T) {
 	target := &Target{
-		Project:   "sales",
-		SourceApp: "ca-sales-prod",
-		Domain:    "happyhill-70162bb9.uksouth.azurecontainerapps.io",
+		Project:    "sales",
+		ServiceApp: "ca-sales-prod",
+		PreviewApp: "ca-sales-preview",
+		Domain:     "happyhill-70162bb9.uksouth.azurecontainerapps.io",
 	}
 
 	got := target.Names(42)
 
 	// Three dashes. Two would address a revision suffix, which changes every
 	// push — the whole point of the label is that this URL does not move.
-	want := "https://ca-sales-prod---pr-42.happyhill-70162bb9.uksouth.azurecontainerapps.io"
+	want := "https://ca-sales-preview---pr-42.happyhill-70162bb9.uksouth.azurecontainerapps.io"
 	if got.URL != want {
 		t.Errorf("URL = %q, want %q", got.URL, want)
 	}
-	if got.App != "ca-sales-prod" {
-		t.Errorf("App = %q, want the source app", got.App)
+	// The PREVIEW app, not the one azd deploys.
+	if got.App != "ca-sales-preview" {
+		t.Errorf("App = %q, want the preview app", got.App)
 	}
 	if got.Label != "pr-42" {
 		t.Errorf("Label = %q, want pr-42", got.Label)
@@ -42,7 +44,10 @@ func TestNames(t *testing.T) {
 }
 
 func TestNamesLabelIsStableAcrossPushes(t *testing.T) {
-	target := &Target{Project: "sales", SourceApp: "ca-sales-prod", Domain: "example.io"}
+	target := &Target{
+		Project: "sales", ServiceApp: "ca-sales-prod",
+		PreviewApp: "ca-sales-preview", Domain: "example.io",
+	}
 	if target.Names(7).URL != target.Names(7).URL {
 		t.Fatal("the same pull request produced two URLs")
 	}
@@ -283,5 +288,51 @@ func TestMultipleRevisionModeRefusesSingle(t *testing.T) {
 	}
 	if err := multipleRevisionMode(app(armappcontainers.ActiveRevisionsModeMultiple)); err != nil {
 		t.Errorf("multiple-revision mode was refused: %v", err)
+	}
+}
+
+// The restore must not carry the live revision's suffix back onto the app.
+// Container Apps rejects a PUT naming a suffix that already exists — it does
+// not treat it as the no-op it looks like — and a failed restore leaves the
+// preview's database name on the app that serves production.
+func TestForRestoreClearsTheSuffix(t *testing.T) {
+	live := productionTemplate()
+	if live.RevisionSuffix == nil {
+		t.Fatal("fixture should carry a suffix")
+	}
+
+	restored := forRestore(live)
+
+	if restored.RevisionSuffix != nil {
+		t.Errorf("RevisionSuffix = %q, want nil — this is the PUT Azure rejects",
+			*restored.RevisionSuffix)
+	}
+	if templateImage(restored) != templateImage(live) {
+		t.Error("the restore changed the image it was meant to put back")
+	}
+	// The caller still needs the original, so clearing must not reach through.
+	if live.RevisionSuffix == nil {
+		t.Error("forRestore mutated the template it was given")
+	}
+}
+
+func TestForRestoreToleratesNil(t *testing.T) {
+	if forRestore(nil) != nil {
+		t.Error("forRestore(nil) should be nil")
+	}
+}
+
+// Which shape a target is in decides whether the app template has to be put back
+// after a preview is written to it — the single most consequential branch in
+// this package.
+func TestDedicated(t *testing.T) {
+	shared := &Target{ServiceApp: "ca-sales-prod", PreviewApp: "ca-sales-prod"}
+	if shared.dedicated() {
+		t.Error("previews on the service app are not dedicated — the restore must run")
+	}
+
+	own := &Target{ServiceApp: "ca-sales-prod", PreviewApp: "ca-sales-preview"}
+	if !own.dedicated() {
+		t.Error("previews on their own app are dedicated — there is nothing to restore")
 	}
 }

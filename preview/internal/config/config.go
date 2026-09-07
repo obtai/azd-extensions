@@ -56,8 +56,24 @@ type Config struct {
 	// ${env:NAME|fallback}), plus ${url}, ${database}, ${label} and ${pr}.
 	ProvisionEnv map[string]string `yaml:"provisionEnv"`
 
+	// PreviewApp is the container app preview revisions are added to. Defaults
+	// to the app the azd service deploys.
+	//
+	// Prefer naming a DEDICATED app here — one the repository's own
+	// infrastructure declares and nothing else deploys to. A revision is minted
+	// from its app's template, so a preview necessarily writes its own APP_ENV
+	// and database name onto whichever app hosts it. On an app of its own that
+	// is harmless. On the app serving production it is not, and the extension
+	// has to put the template back afterwards, minting a revision every push to
+	// do it.
+	//
+	// Substitutions: ${output:NAME} for a deployment output, ${env:NAME}, and
+	// ${secret:name}.
+	PreviewApp string `yaml:"previewApp"`
+
 	// LiveLabel is the revision label carrying production traffic on the app
-	// previews are added to. Defaults to `live`.
+	// previews are added to. Only consulted when previews share the service app,
+	// which is the shape PreviewApp above exists to avoid. Defaults to `live`.
 	//
 	// A preview is a zero-traffic revision of that app, so the extension has to
 	// know which revision production is actually on: it is the template a
