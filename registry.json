@@ -182,6 +182,65 @@
               "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.3.0/obtai-preview-windows-arm64.zip"
             }
           }
+        },
+        {
+          "version": "0.4.0",
+          "capabilities": [
+            "custom-commands",
+            "metadata"
+          ],
+          "usage": "azd preview <command> [options]",
+          "examples": null,
+          "artifacts": {
+            "darwin/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "a8381e2db8bfe7ed67f262c8f1fd98e4855dda809966b06c784af13880a48613"
+              },
+              "entryPoint": "obtai-preview-darwin-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-darwin-amd64.zip"
+            },
+            "darwin/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "8c00089bdc3a40f18f402afd07bddece8f7b6af8572e9b9b88c2a78298bc63e8"
+              },
+              "entryPoint": "obtai-preview-darwin-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-darwin-arm64.zip"
+            },
+            "linux/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "0a43613f1a51548bc73bb3247bac6e353bf17bbe85d13186e5c191cfee78306e"
+              },
+              "entryPoint": "obtai-preview-linux-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-linux-amd64.tar.gz"
+            },
+            "linux/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "09a5d5639ee31b3e9dde4e3572390e438378bfa593b13491e7180fee328aca7c"
+              },
+              "entryPoint": "obtai-preview-linux-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-linux-arm64.tar.gz"
+            },
+            "windows/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "594ca3a8ddfa72eda51e244e8d09d408bf97f4a870eece2850ddedc2b28d5c9c"
+              },
+              "entryPoint": "obtai-preview-windows-amd64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-windows-amd64.zip"
+            },
+            "windows/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "6f1e35ce6f7ea87957a68da2025caee8f2caa24d6a8678d49f609d6678f41928"
+              },
+              "entryPoint": "obtai-preview-windows-arm64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-preview_0.4.0/obtai-preview-windows-arm64.zip"
+            }
+          }
         }
       ]
     }
