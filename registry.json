@@ -302,6 +302,73 @@
           }
         }
       ]
+    },
+    {
+      "id": "obtai.shell",
+      "namespace": "shell",
+      "displayName": "OBT Shell",
+      "description": "An interactive shell in a running Azure Container Apps container.",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "capabilities": [
+            "custom-commands",
+            "metadata"
+          ],
+          "usage": "azd shell [options]",
+          "examples": null,
+          "artifacts": {
+            "darwin/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "6967862171cc6bb01e3d5474f537e254afb799d3d699d1c5c74a66c4cca252db"
+              },
+              "entryPoint": "obtai-shell-darwin-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-darwin-amd64.zip"
+            },
+            "darwin/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "1e77b62b508ce8ffeb2725f1b82bea42a7acf5f2e59104a78ef9805fb2dbf3ee"
+              },
+              "entryPoint": "obtai-shell-darwin-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-darwin-arm64.zip"
+            },
+            "linux/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "08f0db5c411aa8d765a30c366f678f6fec1f48af4103694345b06c13dbe525f8"
+              },
+              "entryPoint": "obtai-shell-linux-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-linux-amd64.tar.gz"
+            },
+            "linux/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "616f252f90c580fd5c5bb45ed3fb7c38c910c979561c185bebb1adb771a1bbe2"
+              },
+              "entryPoint": "obtai-shell-linux-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-linux-arm64.tar.gz"
+            },
+            "windows/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "d869a1659c2874ffb4a7ffb22788d7bd00de035720f200ab4111aa54a3f3fead"
+              },
+              "entryPoint": "obtai-shell-windows-amd64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-windows-amd64.zip"
+            },
+            "windows/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "644cb2091275902cf5afbc5be27ffd1c2445da041d1d41d2107a233e55b5a42c"
+              },
+              "entryPoint": "obtai-shell-windows-arm64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-shell_0.1.0/obtai-shell-windows-arm64.zip"
+            }
+          }
+        }
+      ]
     }
   ]
 }
