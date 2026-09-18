@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/refs/heads/main/cli/azd/extensions/extension.schema.json
+
+# A shell in a running container app, picked rather than spelt out — ecsgo for
+# Container Apps. The namespace is `shell` because azd already owns `exec`.
+#
+# `lifecycle-events` is deliberately absent: this extension subscribes to
+# nothing and is started only when someone runs `azd shell`.
+#
+# `metadata` is declared because the binary implements the `metadata` command —
+# azd invokes it at install and caches the result for help and IntelliSense, but
+# only if the capability is declared.
+capabilities:
+    - custom-commands
+    - metadata
+description: An interactive shell in a running Azure Container Apps container.
+displayName: OBT Shell
+id: obtai.shell
+language: go
+namespace: shell
+usage: azd shell [options]
+version: 0.1.0

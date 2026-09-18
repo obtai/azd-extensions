@@ -2,3 +2,6 @@
 bin/
 *.tar.gz
 *.zip
+
+# macOS
+.DS_Store
