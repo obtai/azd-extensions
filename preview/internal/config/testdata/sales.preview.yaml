@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/obtai/azd-extensions/main/preview/preview.schema.json
+
+# PR previews, read by the `obtai.preview` azd extension.
+#
+#   azd preview up   42
+#   azd preview url  42
+#   azd preview down 42
+#
+# The extension owns the shape of a preview: a zero-traffic revision of the app
+# named below, carrying the label `pr-<n>`, an image tag and a revision suffix
+# per push, its own database, and a teardown that removes all of it. That shape
+# is the same in every repo, which is why it is an extension rather than a
+# script in this one.
+#
+# The release lifecycle is NOT here — the secrets, the migration and the health
+# gate are hooks in azure.yaml, because what a release has to do differs per
+# repo.
+
+# Previews live alongside production, never in their own environment: azd's unit
+# is an environment, and one per pull request would mean a resource group,
+# Postgres server and Foundry account each. There was a dev environment to sit
+# beside once; it earned nothing a preview does not already give, so it went.
+#
+# Sharing production has two consequences worth knowing. A preview runs
+# unreviewed code with production's managed identity, so it can read the same
+# Key Vault and log in to the same Postgres server — fine for an internal tool
+# with trusted contributors, and worth saying out loud. And previews do NOT
+# touch the Foundry agents: scripts/provision.ts skips that step for them,
+# because agents are keyed by name and there is only one set.
+previewEnvironment: prod
+
+# The same script `azd deploy` runs. The extension sets the three variables
+# below first, so a preview creates and migrates its own database using this
+# repo's own code — which means a migration is exercised by the PR that changes
+# it.
+provision: sh scripts/hooks/predeploy.sh
+
+# What a preview overrides on the preview app, and nothing else. Everything else
+# — the managed identity, the registry, the Key Vault secret references, the
+# probes and every other environment variable — is inherited from that app, and
+# that app is declared by the SAME bicep module as production. So a new variable
+# in infra/modules/container-app.bicep reaches previews without touching this
+# file, because it is declared once rather than copied off a live revision.
+env:
+  APP_ENV: preview
+  APP_URL: ${url}
+  BETTER_AUTH_URL: ${url}
+  PG_DATABASE: ${database}
+  # Smaller than production's pool. max_connections is 50 on the Burstable tier
+  # and every preview holds its own pool against the same server, so the sum
+  # that matters is production's 10 plus 5 per live preview — eight at once
+  # before it gets tight. Keep this in step with main.bicep's previewPgPoolMax.
+  PG_POOL_MAX: '5'
+
+# The app previews are added to — NOT the one customers use.
+#
+# A revision is minted from its app's template, so a preview necessarily writes
+# APP_ENV=preview and its own database name onto whichever app hosts it. Pointing
+# this at production was tried: it needed the template restoring afterwards plus
+# two guards, and it still left a pull request's database on production's
+# template when the restore failed. ca-sales-preview scales to zero, nothing else
+# deploys to it, and the whole class of problem goes away.
+previewApp: ${output:SALES_PREVIEW_APP_NAME}

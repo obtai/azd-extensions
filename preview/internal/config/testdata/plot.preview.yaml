@@ -1,0 +1,26 @@
+previewEnvironment: dev
+prefix: APP
+labels: [comet, ember, falcon, glacier, harbour, juniper, lantern, meadow, orbit, quartz]
+database:
+  create: true
+  server: ${output:APP_DATABASE_SERVER_NAME}
+services:
+  api:
+    app: ${output:APP_API_CONTAINER_APP_NAME}
+    dockerfile: apps/api/Dockerfile
+    context: .
+    healthPath: /api/health
+    env:
+      DB_NAME: ${database}
+      APP_ORIGIN: ${url:ui}
+      AUTH_TRUSTED_ORIGINS: ${url:ui}
+      DB_POOL_MAX: '4'
+      QUEUE_DB_POOL_MAX: '2'
+      AUTH_DB_POOL_MAX: '2'
+  ui:
+    app: ${output:APP_UI_CONTAINER_APP_NAME}
+    dockerfile: apps/ui/Dockerfile
+    context: .
+    healthPath: /healthz
+    env:
+      API_UPSTREAM: https://${fqdn:api}

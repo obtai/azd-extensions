@@ -99,7 +99,7 @@ func (c *Clients) BuildImage(
 
 	args = append(args, contextDir)
 
-	if err := docker(ctx, args...); err != nil {
+	if err := c.docker(ctx, args...); err != nil {
 		return fmt.Errorf("building %s: %w", image, err)
 	}
 	return nil
@@ -135,9 +135,9 @@ func ensureBuilder(ctx context.Context) error {
 
 // docker runs the CLI with its output left attached to the terminal. The build
 // log is the point of building locally, so it is not captured.
-func docker(ctx context.Context, args ...string) error {
+func (c *Clients) docker(ctx context.Context, args ...string) error {
 	command := exec.CommandContext(ctx, "docker", args...)
-	command.Stdout = os.Stdout
+	command.Stdout = c.Log
 	command.Stderr = os.Stderr
 	return command.Run()
 }

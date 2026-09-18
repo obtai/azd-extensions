@@ -6,7 +6,9 @@ package azure
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -22,6 +24,10 @@ type Clients struct {
 	ResourceGroup  string
 
 	credential azcore.TokenCredential
+
+	// Log is where progress goes. Stdout, unless a caller wants stdout for
+	// something a script will parse.
+	Log io.Writer
 
 	ContainerApps *armappcontainers.ContainerAppsClient
 	Revisions     *armappcontainers.ContainerAppsRevisionsClient
@@ -48,6 +54,7 @@ func New(ctx context.Context, subscriptionID, resourceGroup string) (*Clients, e
 		SubscriptionID: subscriptionID,
 		ResourceGroup:  resourceGroup,
 		credential:     credential,
+		Log:            os.Stdout,
 		ContainerApps:  apps.NewContainerAppsClient(),
 		Revisions:      apps.NewContainerAppsRevisionsClient(),
 		Databases:      postgres.NewDatabasesClient(),

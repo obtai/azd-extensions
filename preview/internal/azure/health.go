@@ -18,7 +18,7 @@ const (
 // routing as well, but it cannot tell a revision that is slow from one that will
 // never start, so it can only ever warn — this is what fails.
 func WaitHealthy(ctx context.Context, clients *Clients, app, revision string) error {
-	fmt.Printf("==> Waiting for %s\n", revision)
+	fmt.Fprintf(clients.Log, "==> Waiting for %s\n", revision)
 
 	state := "Unknown"
 	healthy := Until(ctx, healthTimeout, healthInterval, func(ctx context.Context) bool {
@@ -30,7 +30,7 @@ func WaitHealthy(ctx context.Context, clients *Clients, app, revision string) er
 			state = string(*response.Properties.HealthState)
 		}
 		if state != "Healthy" {
-			fmt.Printf("    %s…\n", state)
+			fmt.Fprintf(clients.Log, "    %s…\n", state)
 		}
 		return state == "Healthy"
 	})
@@ -40,6 +40,6 @@ func WaitHealthy(ctx context.Context, clients *Clients, app, revision string) er
 		return fmt.Errorf("%s never became healthy (%s), and has been deactivated", revision, state)
 	}
 
-	fmt.Printf("    %s is healthy\n", revision)
+	fmt.Fprintf(clients.Log, "    %s is healthy\n", revision)
 	return nil
 }

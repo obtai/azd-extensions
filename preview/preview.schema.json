@@ -4,7 +4,42 @@
   "properties": {
     "previewEnvironment": {
       "type": "string",
-      "description": "PreviewEnvironment is the environment previews are deployed alongside.\nThey always live in an existing one, never their own: azd's unit is an\nenvironment, and one per pull request would mean a resource group,\ndatabase server and everything else per pull request.\n\nQualified rather than plain `environment`, because this file describes an\nordinary release as well, and there \"the environment\" means the one being\ndeployed."
+      "description": "PreviewEnvironment is the azd environment previews are deployed alongside.\nThey always live in an existing one, never their own: azd's unit is an\nenvironment, and one per pull request would mean a resource group,\ndatabase server and everything else per pull request.\n\nOptional since 0.6.0. Without it no azd environment is read at all, and\nevery value comes from `outputs:` or the process environment — which is\nhow a repository whose infrastructure was not provisioned by azd runs\npreviews.\n\nQualified rather than plain `environment`, because this file describes an\nordinary release as well, and there \"the environment\" means the one being\ndeployed."
+    },
+    "prefix": {
+      "type": "string",
+      "description": "Prefix is the deployment-output prefix: `SALES` gives\nSALES_CONTAINER_APP_NAME, SALES_CONTAINER_APPS_ENV_DOMAIN and so on.\nDefaults to the azd project name uppercased, with dashes and dots as\nunderscores."
+    },
+    "outputs": {
+      "properties": {
+        "subscriptionId": {
+          "type": "string",
+          "description": "SubscriptionID, conventionally AZURE_SUBSCRIPTION_ID."
+        },
+        "resourceGroup": {
+          "type": "string",
+          "description": "ResourceGroup, conventionally AZURE_RESOURCE_GROUP."
+        },
+        "registry": {
+          "type": "string",
+          "description": "Registry is the login server, conventionally\nAZURE_CONTAINER_REGISTRY_ENDPOINT."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Domain is the Container Apps environment's default domain, conventionally\n\u003cPREFIX\u003e_CONTAINER_APPS_ENV_DOMAIN."
+        },
+        "postgresServer": {
+          "type": "string",
+          "description": "PostgresServer is the flexible server's name, conventionally\n\u003cPREFIX\u003e_POSTGRES_SERVER_NAME. Optional: without one there is no\ndatabase to create or drop."
+        },
+        "keyVault": {
+          "type": "string",
+          "description": "KeyVault is the vault ${secret:name} reads, conventionally\n\u003cPREFIX\u003e_KEY_VAULT_NAME. Optional."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Outputs names the deployment values explicitly, for a deployment whose\noutputs do not follow the prefix convention. Each accepts ${output:NAME}\nand ${env:NAME}. Anything left unset is looked up by its conventional\nname: in the azd environment first, then the process environment."
     },
     "provision": {
       "type": "string",
@@ -15,33 +50,111 @@
         "type": "string"
       },
       "type": "object",
-      "description": "Env is what a preview overrides on the revision production is serving.\nEverything else — identity, registry, secret references, probes, every\nother variable — is inherited, so a new variable in the infrastructure\nreaches previews without this file being touched.\n\n${url}, ${database}, ${label} and ${pr} are substituted."
+      "description": "Env is what a preview overrides on the revision production is serving.\nEverything else — identity, registry, secret references, probes, every\nother variable — is inherited, so a new variable in the infrastructure\nreaches previews without this file being touched.\n\nThe single-service shorthand for `services.\u003cname\u003e.env`; the two may not\nbe combined.\n\nSubstitutions: ${url}, ${database}, ${label}, ${pr}, ${url:\u003cservice\u003e},\n${fqdn:\u003cservice\u003e}, ${output:NAME} and ${env:NAME|fallback}. Not\n${secret:name}: a revision template is stored in plaintext, so a secret\nbelongs in a Key Vault reference the app already carries."
     },
     "provisionEnv": {
       "additionalProperties": {
         "type": "string"
       },
       "type": "object",
-      "description": "ProvisionEnv is extra environment for the provision command, on top of\nthe deployment outputs it already receives. Reach for it when a migration\nneeds something the deployment did not record — a Key Vault secret, or a\nvalue that differs per caller.\n\nSubstitutions: ${output:NAME} for a deployment output, ${secret:name} for\na Key Vault secret, ${env:NAME} for the caller's own environment (with\n${env:NAME|fallback}), plus ${url}, ${database}, ${label} and ${pr}."
+      "description": "ProvisionEnv is extra environment for the provision command, on top of\nthe deployment outputs it already receives. Reach for it when a migration\nneeds something the deployment did not record — a Key Vault secret, or a\nvalue that differs per caller.\n\nSubstitutions: ${output:NAME} for a deployment output, ${secret:name} for\na Key Vault secret, ${env:NAME} for the caller's own environment (with\n${env:NAME|fallback}), plus ${url}, ${database}, ${label}, ${pr},\n${url:\u003cservice\u003e} and ${fqdn:\u003cservice\u003e}."
     },
     "previewApp": {
       "type": "string",
-      "description": "PreviewApp is the container app preview revisions are added to. Defaults\nto the app the azd service deploys.\n\nPrefer naming a DEDICATED app here — one the repository's own\ninfrastructure declares and nothing else deploys to. A revision is minted\nfrom its app's template, so a preview necessarily writes its own APP_ENV\nand database name onto whichever app hosts it. On an app of its own that\nis harmless. On the app serving production it is not, and the extension\nhas to put the template back afterwards, minting a revision every push to\ndo it.\n\nSubstitutions: ${output:NAME} for a deployment output, ${env:NAME}, and\n${secret:name}."
+      "description": "PreviewApp is the container app preview revisions are added to. Defaults\nto the app the azd service deploys. The single-service shorthand for\n`services.\u003cname\u003e.app`.\n\nPrefer naming a DEDICATED app here — one the repository's own\ninfrastructure declares and nothing else deploys to. A revision is minted\nfrom its app's template, so a preview necessarily writes its own APP_ENV\nand database name onto whichever app hosts it. On an app of its own that\nis harmless. On the app serving production it is not, and the extension\nhas to put the template back afterwards, minting a revision every push to\ndo it.\n\nSubstitutions: ${output:NAME} for a deployment output, ${env:NAME}, and\n${secret:name}."
     },
     "liveLabel": {
       "type": "string",
-      "description": "LiveLabel is the revision label carrying production traffic on the app\npreviews are added to. Only consulted when previews share the service app,\nwhich is the shape PreviewApp above exists to avoid. Defaults to `live`.\n\nA preview is a zero-traffic revision of that app, so the extension has to\nknow which revision production is actually on: it is the template a\npreview is derived from, and the one the app is restored to afterwards.\nNaming it beats reading the traffic split, because a label says which\nrevision is deliberate where a weight of 100 says only which one won."
+      "description": "LiveLabel is the revision label carrying production traffic on the app\npreviews are added to. Only consulted when previews share the service app,\nwhich is the shape PreviewApp above exists to avoid. Defaults to `live`.\n\nA preview is a zero-traffic revision of that app, so the extension has to\nknow which revision production is actually on: it is the template a\npreview is derived from, and the one the app is restored to afterwards.\nNaming it beats reading the traffic split, because a label says which\nrevision is deliberate where a weight of 100 says only which one won.\nWhen no revision carries the label, the one holding 100% of traffic is\nused instead."
     },
     "dockerfile": {
       "type": "string",
-      "description": "Dockerfile relative to the repository root."
+      "description": "Dockerfile relative to the repository root. The single-service shorthand\nfor `services.\u003cname\u003e.dockerfile`."
+    },
+    "labels": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "description": "Labels is a fixed pool of revision labels previews borrow from, in\npreference order. A label's URL is stable for as long as the label\nexists, and an app that signs people in through Entra has to register\nevery callback URL by hand — so a pool of N names registered once beats\na `pr-\u003cn\u003e` per pull request registered never. A pull request keeps the\nlabel it holds across pushes and gives it back on `down`; when every\nlabel is held, `up` fails rather than queueing. Unset, the label is\n`pr-\u003cn\u003e`."
+    },
+    "database": {
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Create makes the extension create the database over ARM before\n`provision` runs, rather than leaving it to that command. A server behind\na private endpoint cannot be reached from a runner with psql, and an app\nthat migrates itself at boot has no provision step at all — ARM is the\none door that is always open."
+        },
+        "server": {
+          "type": "string",
+          "description": "Server overrides the flexible server's name. Accepts ${output:NAME} and\n${env:NAME}."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name overrides the database name, which is `\u003cproject\u003e_pr_\u003cn\u003e` by\ndefault. Accepts ${pr} and ${label}."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "description": "Database says whether the extension creates the pull request's database\nitself, and where."
+    },
+    "services": {
+      "additionalProperties": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "description": "App is the container app this service's preview revisions are added to.\nDefaults to the service's own deployment output,\n\u003cPREFIX\u003e_\u003cSERVICE\u003e_CONTAINER_APP_NAME. Accepts ${output:NAME} and\n${env:NAME}."
+          },
+          "dockerfile": {
+            "type": "string",
+            "description": "Dockerfile relative to the repository root. Defaults to `Dockerfile`."
+          },
+          "context": {
+            "type": "string",
+            "description": "Context is the build context, relative to the repository root. Defaults\nto `.`."
+          },
+          "image": {
+            "type": "string",
+            "description": "Image is the registry repository the build is pushed to. Defaults to the\nservice name."
+          },
+          "container": {
+            "type": "string",
+            "description": "Container names which container in the app's template gets the new\nimage and the env overrides. Defaults to the first."
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "description": "Env is what the preview overrides on this service's template. The same\nsubstitutions as the top-level `env`."
+          },
+          "healthPath": {
+            "type": "string",
+            "description": "HealthPath is probed on the preview URL once the revision is healthy.\nDefaults to `/api/health`."
+          },
+          "scale": {
+            "properties": {
+              "min": {
+                "type": "integer"
+              },
+              "max": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "description": "Scale bounds the preview's replicas. Defaults to 0–1, so an idle preview\ncosts nothing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "description": "Service is one container app of a pull request's preview."
+      },
+      "type": "object",
+      "description": "Services declares more than one container app per pull request, keyed by\nazd service name and minted in declaration order. Every service's URL is\nknown before anything is built, so one service's env can name another's\nwith ${url:\u003cservice\u003e} or ${fqdn:\u003cservice\u003e}. Leave it out for a\nsingle-service repository: `previewApp`, `dockerfile` and `env` at the\ntop level describe one service named after the azd project."
     }
   },
   "additionalProperties": false,
   "type": "object",
-  "required": [
-    "previewEnvironment"
-  ],
   "title": "azd preview configuration",
   "description": "Per-pull-request preview environments, read by the obtai.preview azd extension."
 }

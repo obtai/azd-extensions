@@ -26,9 +26,11 @@ func NewRootCommand() *cobra.Command {
 
 	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
 
-	rootCmd.AddCommand(newUpCommand())
-	rootCmd.AddCommand(newDownCommand())
-	rootCmd.AddCommand(newURLCommand())
+	rootCmd.AddCommand(newUpCommand(&extCtx.OutputFormat))
+	rootCmd.AddCommand(newDownCommand(&extCtx.OutputFormat))
+	rootCmd.AddCommand(newURLCommand(&extCtx.OutputFormat))
+	rootCmd.AddCommand(newStatusCommand(&extCtx.OutputFormat))
+	rootCmd.AddCommand(newPromoteCommand(&extCtx.OutputFormat))
 	rootCmd.AddCommand(newVersionCommand(&extCtx.OutputFormat))
 	rootCmd.AddCommand(newMetadataCommand(rootCmd))
 

@@ -39,6 +39,22 @@ func main() {
 	}
 
 	schema := reflector.Reflect(&config.Config{})
+
+	// `services` is an ordered list in Go, because declaration order is the
+	// mint order and a map would lose it. In the file it is a mapping keyed by
+	// service name, so the schema says so: reflection would have described the
+	// slice.
+	services, ok := schema.Properties.Get("services")
+	if !ok {
+		fail("Config has no services field")
+	}
+	services.Type = "object"
+	services.Items = nil
+	services.AdditionalProperties = reflector.Reflect(&config.Service{})
+	services.AdditionalProperties.Version = ""
+	services.AdditionalProperties.ID = ""
+	schema.Properties.Set("services", services)
+
 	schema.ID = jsonschema.ID(schemaID)
 	schema.Title = "azd preview configuration"
 	schema.Description = "Per-pull-request preview environments, read by the obtai.preview azd extension."
