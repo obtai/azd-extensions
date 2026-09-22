@@ -369,6 +369,73 @@
           }
         }
       ]
+    },
+    {
+      "id": "obtai.db",
+      "namespace": "db",
+      "displayName": "OBT Database",
+      "description": "A psql session on the Azure Database for PostgreSQL flexible server behind an app.",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "capabilities": [
+            "custom-commands",
+            "metadata"
+          ],
+          "usage": "azd db [options] [-- psql args]",
+          "examples": null,
+          "artifacts": {
+            "darwin/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "52ba137f3be9b0b2887e74a786d2e8f0df200f3962f6eefa10df2e5b5ef810c3"
+              },
+              "entryPoint": "obtai-db-darwin-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-darwin-amd64.zip"
+            },
+            "darwin/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "6fa1f50d8b7cf36c02ee412da10480ae155476a38bea3bea7d769b55986b08c2"
+              },
+              "entryPoint": "obtai-db-darwin-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-darwin-arm64.zip"
+            },
+            "linux/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "22a5d6845be024bcd45abe24ccf6640e266c1301d0685c9b6c1e3462560c1a74"
+              },
+              "entryPoint": "obtai-db-linux-amd64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-linux-amd64.tar.gz"
+            },
+            "linux/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "908c812a143d12db8d2faa8e8871a15b07effced387ee0c5fe94386a0192e694"
+              },
+              "entryPoint": "obtai-db-linux-arm64",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-linux-arm64.tar.gz"
+            },
+            "windows/amd64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "5ee5812ae57857daf83b66ba97cd1cdab3c4beaadb5657f10deebfba51ea9759"
+              },
+              "entryPoint": "obtai-db-windows-amd64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-windows-amd64.zip"
+            },
+            "windows/arm64": {
+              "checksum": {
+                "algorithm": "sha256",
+                "value": "b2d0a8a31fd1696d03ecab8719c936928727600343e117012bd6f385b3af0c61"
+              },
+              "entryPoint": "obtai-db-windows-arm64.exe",
+              "url": "https://github.com/obtai/azd-extensions/releases/download/azd-ext-obtai-db_0.1.0/obtai-db-windows-arm64.zip"
+            }
+          }
+        }
+      ]
     }
   ]
 }
