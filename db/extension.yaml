@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/refs/heads/main/cli/azd/extensions/extension.schema.json
+
+# A psql session on the flexible server in the app's resource group, picked
+# rather than spelt out. The server name carries a uniqueString suffix, the
+# role name is the caller's UPN and the password is an Entra token: three
+# things nobody should be looking up by hand.
+#
+# `lifecycle-events` is deliberately absent: this extension subscribes to
+# nothing and is started only when someone runs `azd db`.
+#
+# `metadata` is declared because the binary implements the `metadata` command —
+# azd invokes it at install and caches the result for help and IntelliSense, but
+# only if the capability is declared.
+capabilities:
+    - custom-commands
+    - metadata
+description: A psql session on the Azure Database for PostgreSQL flexible server behind an app.
+displayName: OBT Database
+id: obtai.db
+language: go
+namespace: db
+usage: azd db [options] [-- psql args]
+version: 0.1.0
